@@ -1,0 +1,6 @@
+[submodule "externals/NISTfit"]
+	path = externals/NISTfit
+	url = https://github.com/usnistgov/NISTfit.git
+[submodule "externals/CoolProp"]
+	path = externals/CoolProp
+	url = https://github.com/CoolProp/CoolProp
