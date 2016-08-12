@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.0)
 
 project(PHIFIT)
 
+# Set the standard for C++ to c++11
+set(CMAKE_CXX_STANDARD 11)
+
 # Add CoolProp dependency
 set(COOLPROP_STATIC_LIBRARY true CACHE BOOL "Use CoolProp")
 add_subdirectory("${CMAKE_SOURCE_DIR}/externals/CoolProp" "CoolProp")
@@ -18,7 +21,7 @@ file(GLOB_RECURSE APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 if (PHIFIT_MAIN)
     # Add fitter code
-    add_executable(Main ${APP_SOURCES})
+    add_executable(Main ${APP_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cxx")
 
     # Link it to its dependent libraries
     target_link_libraries (Main CoolProp NISTfit)
