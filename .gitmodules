@@ -4,3 +4,6 @@
 [submodule "externals/CoolProp"]
 	path = externals/CoolProp
 	url = https://github.com/CoolProp/CoolProp
+[submodule "externals/Catch"]
+	path = externals/Catch
+	url = https://github.com/philsquared/Catch.git

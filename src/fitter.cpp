@@ -21,6 +21,9 @@
 #include <iostream>
 #include <chrono>
 
+// Includes from phifit
+#include "phifit/fitter.h"
+
 using namespace NISTfit;
 
 /// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
@@ -64,7 +67,7 @@ public:
 
 class PTXYOutput : public NumericOutput {
 protected:
-    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output
+    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
 public:
     PTXYOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
         : NumericOutput(in), m_evaluator(eval) { };
@@ -75,9 +78,11 @@ public:
     // Do the calculation
     void evaluate_one() {
         const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        // Resize the row in the Jacobian matrix if needed
         if (Jacobian_row.size() != c.size()) {
             resize(c.size());
         }
+        // Evaluate the residual at given coefficients
         m_y_calc = evaluate(c, false); 
         for (std::size_t i = 0; i < c.size(); ++i) {
             // Numerical derivatives :(
@@ -146,7 +151,7 @@ public:
     }
 };
 
-/// The class for the evaluation of a single output value for a single input value
+/// The evaluator class that is used to evaluate the output values from the input values
 class MixtureEvaluator : public AbstractNumericEvaluator {
 public:
     void add_terms(const std::string &backend, const std::string &fluids, rapidjson::Value& terms)
@@ -154,7 +159,7 @@ public:
         // Iterate over the terms in the input
         for (rapidjson::Value::ValueIterator itr = terms.Begin(); itr != terms.End(); ++itr)
         {
-            // Get the type of the data point
+            // Get the type of the data point (make sure it has one)
             if (!(*itr).HasMember("type")){ throw CoolProp::ValueError("Missing type"); }
             std::string type = cpjson::get_string(*itr, "type");
 
@@ -181,7 +186,7 @@ rapidjson::Document JSON_string_to_rapidjson(const std::string &JSON_string)
 }
 
 /// The function that actually does the fitting
-double fit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading = false, short Nthreads = 4)
+double simplefit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading, short Nthreads, std::vector<double> &c0, std::vector<double> &cfinal)
 {
     // TODO: Validate the JSON against schema
     rapidjson::Document datadoc = JSON_string_to_rapidjson(JSON_data_string);
@@ -198,23 +203,9 @@ double fit(const std::string &JSON_data_string, const std::string &JSON_fit0_str
     std::shared_ptr<AbstractEvaluator> eval(new MixtureEvaluator());
     MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(eval.get());
     mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
-
-    //std::vector<double> c0 = { 0.996199694, 1.01473019, 0.997607277, 1.00303472};
-    //std::vector<double> c0 = {0.984068272,1.268636194,1.007469726,1.071917985}; 
-    std::vector<double> c0 = { 1,1,1,1 };
     
     auto startTime = std::chrono::system_clock::now();
-    auto cc = LevenbergMarquadt(eval, c0, threading, Nthreads);
-    for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
+    cfinal = LevenbergMarquadt(eval, c0, threading, Nthreads);
+    //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
     return std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
-}
-
-int main() {
-    std::string JSON_filename = "C:\\Users\\ihb\\Documents\\Code\\THERMfit\\Ethane_n-Propane.json";
-    std::string JSON_data_string = get_file_contents(JSON_filename.c_str());
-
-    fmt::printf("%g\n", fit(JSON_data_string, "", false, 1));
-    for (auto &Nthreads : {1,2,3,4,5,6,7,8}){
-        fmt::printf("%d %g\n", Nthreads, fit(JSON_data_string, "", true, Nthreads));
-    }
 }
