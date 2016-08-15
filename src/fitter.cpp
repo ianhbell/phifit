@@ -103,16 +103,24 @@ public:
 
         HEOS->SatL->set_mole_fractions(in->x());
         double RT = HEOS->SatL->gas_constant()*in->T();
-        HEOS->SatL->update_TP_guessrho(in->T(), in->p(), in->rhoL());
+        if (in->rhoL() < 0){
+            HEOS->SatL->update(CoolProp::PT_INPUTS,  in->p(), in->T());
+        }
+        else{
+            HEOS->SatL->update_TP_guessrho(in->T(), in->p(), in->rhoL());
+        }
         double mu0L = HEOS->SatL->chemical_potential(0)/RT;
         if (update_densities) { in->set_rhoL(HEOS->SatL->rhomolar()); }
-        double diff = in->rhoL()/HEOS->SatL->rhomolar()-1;
         
         HEOS->SatV->set_mole_fractions(in->y());
-        HEOS->SatV->update_TP_guessrho(in->T(), in->p(), in->rhoV());
+        if (in->rhoV() < 0){
+            HEOS->SatV->update(CoolProp::PT_INPUTS, in->p(), in->T());
+        }
+        else{
+            HEOS->SatV->update_TP_guessrho(in->T(), in->p(), in->rhoV());
+        }
         double mu0V = HEOS->SatV->chemical_potential(0)/RT;
         if (update_densities) { in->set_rhoV(HEOS->SatV->rhomolar()); }
-        double rhodiffV = in->rhoV()/HEOS->SatV->rhomolar()-1;
         
         return mu0V - mu0L;
     }
@@ -151,6 +159,108 @@ public:
     }
 };
 
+/// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
+/// Does not have any of its own routines
+class PRhoTInput : public NumericInput
+{
+protected:
+    shared_ptr<CoolProp::AbstractState> AS;
+    double m_p, //< Pressure (Pa)
+           m_rhomolar, //< Molar density (mol/m^3)
+           m_T; //< Temperature (K)
+    std::vector<double> m_z; //< Molar composition of mixture
+public:
+    /*
+    @param AS AbstractState to be used for fitting
+    @param p Pressure in Pa
+    @param rho Molar density in mol/m^3
+    @param T Temperature in K
+    @param z Molar composition vector
+    */
+    PRhoTInput(shared_ptr<CoolProp::AbstractState> &AS, double p, double rhomolar, double T, const std::vector<double>&z)
+        : AS(AS), NumericInput(T, p), m_p(p), m_rhomolar(rhomolar), m_T(T), m_z(z) {};
+    /// Return a reference to the AbstractState being modified
+    shared_ptr<CoolProp::AbstractState> &get_AS() { return AS; }
+    /// Get the temperature (K)
+    double T() { return m_T; }
+    /// Get the molar density (mol/m^3)
+    double rhomolar() { return m_rhomolar; }
+    /// Get the pressure (Pa)
+    double p() { return m_p; }
+    /// Get the mole fractions
+    const std::vector<double> &z() { return m_z; }
+};
+
+class PRhoTOutput : public NumericOutput {
+protected:
+    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
+public:
+    PRhoTOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
+        : NumericOutput(in), m_evaluator(eval) { };
+
+    /// Return the error
+    double get_error() { return m_y_calc; };
+
+    // Do the calculation
+    void evaluate_one() {
+        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        // Resize the row in the Jacobian matrix if needed
+        if (Jacobian_row.size() != c.size()) {
+            resize(c.size());
+        }
+        
+        // Evaluate the residual at given coefficients
+        m_y_calc = evaluate(c, false);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            // Numerical derivatives :(
+            Jacobian_row[i] = der(i, 0.00001);
+        }
+    }
+    double evaluate(const std::vector<double> &c, bool update_densities = false) {
+
+        // Cast abstract input to the derived type so we can access its attributes
+        PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
+        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+
+        // Set the BIP in main instance and its children
+        HEOS->set_binary_interaction_double(0, 1, "betaT", c[0]);
+        HEOS->set_binary_interaction_double(0, 1, "gammaT", c[1]);
+        HEOS->set_binary_interaction_double(0, 1, "betaV", c[2]);
+        HEOS->set_binary_interaction_double(0, 1, "gammaV", c[3]);
+
+        // Set the mole fractions
+        HEOS->set_mole_fractions(in->z());
+        // Calculate p = f(T,rho)
+        HEOS->update_DmolarT_direct(in->rhomolar(), in->T());
+        // Return residual as (p_calc - p_exp)/rho_exp*drhodP_exp
+        return (HEOS->p() - in->p())/in->rhomolar()*HEOS->first_partial_deriv(CoolProp::iDmolar, CoolProp::iP, CoolProp::iT);
+    }
+    /// Numerical derivative of the residual term
+    double der(std::size_t i, double dc) {
+        const std::vector<double> &c0 = m_evaluator->get_const_coefficients();
+        std::vector<double> cp = c0, cm = c0;
+        cp[i] += dc; cm[i] -= dc;
+        return (evaluate(cp) - evaluate(cm)) / (2 * dc);
+    }
+    static std::shared_ptr<NumericOutput> factory(rapidjson::Value &v, const std::string &backend, const std::string &fluids, AbstractNumericEvaluator *eval) {
+        std::shared_ptr<NumericOutput> out;
+
+        // Extract parameters from JSON data
+        double T = cpjson::get_double(v, "T (K)");
+        double p = cpjson::get_double(v, "p (Pa)");
+        double rhomolar = cpjson::get_double(v, "rho (mol/m3)");
+        std::vector<double> z = cpjson::get_double_array(v, "z (molar)");
+        
+        // Generate the AbstractState instance owned by this data point
+        std::shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory(backend, fluids));
+        // Generate the input which stores the PTxy data that is to be fit
+        std::shared_ptr<NumericInput> in(new PRhoTInput(AS, p, rhomolar, T, z));
+        // Generate and add the output value
+        out.reset(new PRhoTOutput(std::move(in), eval));
+        return out;
+    }
+};
+
 /// The evaluator class that is used to evaluate the output values from the input values
 class MixtureEvaluator : public AbstractNumericEvaluator {
 public:
@@ -165,7 +275,15 @@ public:
 
             if (type == "PTXY"){
                 auto out = PTXYOutput::factory(*itr, backend, fluids, static_cast<AbstractNumericEvaluator*>(this));
-                m_outputs.push_back(std::move(out));
+                if (out){
+                    m_outputs.push_back(std::move(out));
+                }
+            }
+            else if (type == "PRhoT") {
+                auto out = PRhoTOutput::factory(*itr, backend, fluids, static_cast<AbstractNumericEvaluator*>(this));
+                if (out) {
+                    m_outputs.push_back(std::move(out));
+                }
             }
             else {
                 throw CoolProp::ValueError(fmt::format("I don't understand this data type: %s", type));
@@ -195,9 +313,7 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
 
     auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
     auto CAS2 = CoolProp::get_fluid_param_string(component_names[1], "CAS");
-    /*
     CoolProp::apply_simple_mixing_rule(CAS1, CAS2, "linear");
-    */
 
     // Instantiate the evaluator
     std::shared_ptr<AbstractEvaluator> eval(new MixtureEvaluator());
