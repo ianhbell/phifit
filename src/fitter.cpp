@@ -24,15 +24,25 @@
 
 // Includes from phifit
 #include "phifit/fitter.h"
+#include "phifit/departure_function.h"
 
 using namespace NISTfit;
 
-/// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
-/// Does not have any of its own routines
-class PTXYInput : public NumericInput
-{
+/// This class holds common terms for inputs
+class PhiFitInput : public NumericInput{    
 protected:
     shared_ptr<CoolProp::AbstractState> AS;
+public:
+    PhiFitInput(double x, double y): NumericInput(x, y) {};
+    /// Return a reference to the AbstractState being modified
+    shared_ptr<CoolProp::AbstractState> &get_AS() { return AS; }
+};
+
+/// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
+/// Does not have any of its own routines
+class PTXYInput : public PhiFitInput
+{
+protected:
     double m_T, //< Temperature (K)
            m_p; //< Pressure (Pa)
     std::vector<double> m_x, //< Molar composition of liquid
@@ -45,9 +55,8 @@ public:
      @param p Pressure in Pa
      */
     PTXYInput(shared_ptr<CoolProp::AbstractState> &AS, double T, double p, const std::vector<double>&x, const std::vector<double> &y, double rhoL, double rhoV)
-        : AS(AS), NumericInput(T, p), m_T(T), m_p(p), m_x(x), m_y(y), m_rhoL(rhoL), m_rhoV(rhoV)  {};
-    /// Return a reference to the AbstractState being modified
-    shared_ptr<CoolProp::AbstractState> &get_AS() { return AS; }
+        : PhiFitInput(T, p), m_T(T), m_p(p), m_x(x), m_y(y), m_rhoL(rhoL), m_rhoV(rhoV)  { this->AS = AS; };
+    
     /// Get the temperature (K)
     double T(){ return m_T; }
     /// Get the pressure (Pa)
@@ -162,10 +171,9 @@ public:
 
 /// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
 /// Does not have any of its own routines
-class PRhoTInput : public NumericInput
+class PRhoTInput : public PhiFitInput
 {
 protected:
-    shared_ptr<CoolProp::AbstractState> AS;
     double m_p, //< Pressure (Pa)
            m_rhomolar, //< Molar density (mol/m^3)
            m_T; //< Temperature (K)
@@ -179,9 +187,7 @@ public:
     @param z Molar composition vector
     */
     PRhoTInput(shared_ptr<CoolProp::AbstractState> &AS, double p, double rhomolar, double T, const std::vector<double>&z)
-        : AS(AS), NumericInput(T, p), m_p(p), m_rhomolar(rhomolar), m_T(T), m_z(z) {};
-    /// Return a reference to the AbstractState being modified
-    shared_ptr<CoolProp::AbstractState> &get_AS() { return AS; }
+        : PhiFitInput(T, p), m_p(p), m_rhomolar(rhomolar), m_T(T), m_z(z) {this->AS = AS;};
     /// Get the temperature (K)
     double T() { return m_T; }
     /// Get the molar density (mol/m^3)
@@ -343,6 +349,19 @@ public:
             }
         }
     };
+    void update_departure_function(rapidjson::Value& fit0data) {
+        for (auto &out : m_outputs) {
+            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
+            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            std::size_t i = 0, j = 1;
+            HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+            HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+            HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+            HEOS->set_binary_interaction_double(0, 1, "Fij", 1.0); // Turn on departure term
+            int rr = 0;
+        }
+    }
 };
 
 /// Convert a JSON-formatted string to a rapidjson::Document object
@@ -361,7 +380,7 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
 {
     // TODO: Validate the JSON against schema
     rapidjson::Document datadoc = JSON_string_to_rapidjson(JSON_data_string);
-    //rapidjson::Document fit0doc = JSON_string_to_rapidjson(JSON_fit0_string);
+    rapidjson::Document fit0doc = JSON_string_to_rapidjson(JSON_fit0_string);
     std::vector<std::string> component_names = cpjson::get_string_array(datadoc["about"], std::string("names"));
 
     auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
@@ -372,6 +391,8 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
     std::shared_ptr<AbstractEvaluator> eval(new MixtureEvaluator());
     MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(eval.get());
     mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
+    // Inject the desired departure function
+    mixeval->update_departure_function(fit0doc);
     
     auto startTime = std::chrono::system_clock::now();
     cfinal = LevenbergMarquadt(eval, c0, threading, Nthreads);
