@@ -16,6 +16,7 @@
 #include "Configuration.h"
 #include "Backends/Helmholtz/MixtureParameters.h"
 #include "Backends/Helmholtz/HelmholtzEOSMixtureBackend.h"
+#include "Backends/Helmholtz/ReducingFunctions.h"
 
 // Includes from c++
 #include <iostream>
@@ -211,10 +212,14 @@ public:
         
         // Evaluate the residual at given coefficients
         m_y_calc = evaluate(c, false);
-        for (std::size_t i = 0; i < c.size(); ++i) {
-            // Numerical derivatives :(
-            Jacobian_row[i] = der(i, 0.00001);
-        }
+        // Evaluate the analytic derivatives of the residuals with respect to the coefficients
+        analyt_derivs(Jacobian_row);
+
+        //// Numerical derivatives for testing purposes if necessary
+        //for (std::size_t i = 0; i < c.size(); ++i) {
+        //    // Numerical derivatives :(
+        //    Jacobian_row[i] = der(i, 0.00001);
+        //}
     }
     double evaluate(const std::vector<double> &c, bool update_densities = false) {
 
@@ -235,6 +240,54 @@ public:
         // Return residual as (p_calc - p_exp)/rho_exp*drhodP_exp
         return (HEOS->p() - in->p())/in->rhomolar()*HEOS->first_partial_deriv(CoolProp::iDmolar, CoolProp::iP, CoolProp::iT);
     }
+    void analyt_derivs(std::vector<double> &J) {
+        
+        // Cast abstract input to the derived type so we can access its attributes
+        PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
+        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+
+        // ---
+        // Evaluate already called, constants set
+        // ---
+
+        double DELTAp = HEOS->p() - in->p();
+        double rho_exp = in->rhomolar();
+        double drho_dp__constT_c = HEOS->first_partial_deriv(CoolProp::iDmolar, CoolProp::iP, CoolProp::iT);
+
+        // Some intermediate terms that show up in a couple of places
+        double delta = HEOS->delta();
+        double RT = HEOS->gas_constant()*HEOS->T();
+        double dtau_dbetaT = 1/HEOS->T()*GERG->dTr_dbetaT(in->z());
+        double dtau_dgammaT = 1/HEOS->T()*GERG->dTr_dgammaT(in->z());
+        double rhor = GERG->rhormolar(in->z());
+        double ddelta_dbetaV = -delta*GERG->drhormolar_dbetaV(in->z())/rhor;
+        double ddelta_dgammaV = -delta*GERG->drhormolar_dgammaV(in->z())/rhor;
+
+        // First derivatives of pressure with respect to each of the coefficients at constant T,rho
+        double dp_dbetaT = HEOS->rhomolar()*RT*delta*HEOS->d2alphar_dDelta_dTau()*dtau_dbetaT;
+        double dp_dgammaT = HEOS->rhomolar()*RT*delta*HEOS->d2alphar_dDelta_dTau()*dtau_dgammaT;
+        double dp_dbetaV = HEOS->rhomolar()*RT*(HEOS->dalphar_dDelta() + delta*HEOS->d2alphar_dDelta2())*ddelta_dbetaV;
+        double dp_dgammaV = HEOS->rhomolar()*RT*(HEOS->dalphar_dDelta() + delta*HEOS->d2alphar_dDelta2())*ddelta_dgammaV;
+
+        // First derivatives of d(rho)/dp|T with respect to each of the coefficients
+        // ----
+        // common term for temperature coefficients
+        double bracket_T = -POW2(drho_dp__constT_c)*RT*(2*delta*HEOS->d2alphar_dDelta_dTau() + POW2(delta)*HEOS->d3alphar_dDelta2_dTau());
+        double d_drhodp_dbetaT = bracket_T*dtau_dbetaT;
+        double d_drhodp_dgammaT = bracket_T*dtau_dgammaT;
+        // common term for density coefficients
+        double bracket_rho = -POW2(drho_dp__constT_c)*RT*(2*HEOS->dalphar_dDelta() + 4*delta*HEOS->d2alphar_dDelta2() + POW2(delta)*HEOS->d3alphar_dDelta3());
+        double d_drhodp_dbetaV = bracket_rho*ddelta_dbetaV;
+        double d_drhodp_dgammaV = bracket_rho*ddelta_dgammaV;
+
+        J[0] = 1/rho_exp*(DELTAp*d_drhodp_dbetaT + dp_dbetaT*drho_dp__constT_c);
+        J[1] = 1/rho_exp*(DELTAp*d_drhodp_dgammaT + dp_dgammaT*drho_dp__constT_c);
+        J[2] = 1/rho_exp*(DELTAp*d_drhodp_dbetaV + dp_dbetaV*drho_dp__constT_c);
+        J[3] = 1/rho_exp*(DELTAp*d_drhodp_dgammaV + dp_dgammaV*drho_dp__constT_c);
+        
+    }
+
     /// Numerical derivative of the residual term
     double der(std::size_t i, double dc) {
         const std::vector<double> &c0 = m_evaluator->get_const_coefficients();
