@@ -5,6 +5,9 @@ project(PHIFIT)
 # Set the standard for C++ to c++11
 set(CMAKE_CXX_STANDARD 11)
 
+# Specify the Eigen root directory that will be used for all projects
+include_directories("${CMAKE_SOURCE_DIR}/externals/CoolProp/externals/Eigen")
+
 # Add CoolProp dependency
 set(COOLPROP_STATIC_LIBRARY true CACHE BOOL "Use CoolProp")
 add_subdirectory("${CMAKE_SOURCE_DIR}/externals/CoolProp" "CoolProp")
