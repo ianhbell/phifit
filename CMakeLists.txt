@@ -46,7 +46,16 @@ elseif (PHIFIT_TEST)
 
     # Add root as include directory
     include_directories("${CMAKE_SOURCE_DIR}")
+elseif (PHIFIT_PYBIND11)
+    # ----------------------------
+    # Build pybind11 python module
+    # ----------------------------
+    
+    add_subdirectory(externals/pybind11)
+    add_definitions(-DPYBIND11)
+    pybind11_add_module(MixtureCoefficientFitter ${APP_SOURCES})
+    target_link_libraries (MixtureCoefficientFitter PUBLIC CoolProp PUBLIC NISTfit)
 else()
-    message(FATAL_ERROR "Must select a module: PHIFIT_MAIN, PHIFIT_TEST")
+    message(FATAL_ERROR "Must select a module: PHIFIT_MAIN, PHIFIT_TEST, PHIFIT_PYBIND11")
 endif()
 

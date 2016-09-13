@@ -375,29 +375,87 @@ rapidjson::Document JSON_string_to_rapidjson(const std::string &JSON_string)
     return doc;
 }
 
-/// The function that actually does the fitting
+class CoeffFitClass
+{
+public:
+    std::shared_ptr<AbstractEvaluator> m_eval;
+    std::vector<double> m_cfinal;
+    double m_elap_sec;
+
+    CoeffFitClass(const std::string &JSON_data_string){
+        // TODO: Validate the JSON against schema
+        rapidjson::Document datadoc = JSON_string_to_rapidjson(JSON_data_string);
+        std::vector<std::string> component_names = cpjson::get_string_array(datadoc["about"], std::string("names"));
+
+        try {
+            std::shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory("HEOS", strjoin(component_names,"&")));
+        }
+        catch(...){
+            auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
+            auto CAS2 = CoolProp::get_fluid_param_string(component_names[1], "CAS");
+            CoolProp::apply_simple_mixing_rule(CAS1, CAS2, "linear");
+        }
+
+        // Instantiate the evaluator
+        m_eval.reset(new MixtureEvaluator());
+        MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
+        mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
+
+    }
+    void setup(const std::string &JSON_fit0_string)
+    {
+        // TODO: Validate the JSON against schema
+        rapidjson::Document fit0doc = JSON_string_to_rapidjson(JSON_fit0_string);
+        
+        // Inject the desired departure function
+        MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+        mixeval->update_departure_function(fit0doc);
+    }
+    void run(bool threading, short Nthreads, const std::vector<double> &c0){
+        auto startTime = std::chrono::system_clock::now();
+        LevenbergMarquadtOptions opts;
+        opts.c0 = c0; opts.threading = threading; opts.Nthreads = Nthreads; opts.omega = 0.35;
+        m_cfinal = LevenbergMarquadt(m_eval, opts);
+        //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
+        m_elap_sec = std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
+    }
+    /// Accessor for final values
+    std::vector<double> cfinal(){ return m_cfinal; }
+    /// Accessor for elapsed time
+    double elapsed_sec() { return m_elap_sec; }
+};
+
+/// The function that actually does the fitting - a thin wrapper around the CoeffFitClass
 double simplefit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading, short Nthreads, std::vector<double> &c0, std::vector<double> &cfinal)
 {
-    // TODO: Validate the JSON against schema
-    rapidjson::Document datadoc = JSON_string_to_rapidjson(JSON_data_string);
-    rapidjson::Document fit0doc = JSON_string_to_rapidjson(JSON_fit0_string);
-    std::vector<std::string> component_names = cpjson::get_string_array(datadoc["about"], std::string("names"));
-
-    auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
-    auto CAS2 = CoolProp::get_fluid_param_string(component_names[1], "CAS");
-    CoolProp::apply_simple_mixing_rule(CAS1, CAS2, "linear");
-
-    // Instantiate the evaluator
-    std::shared_ptr<AbstractEvaluator> eval(new MixtureEvaluator());
-    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(eval.get());
-    mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
-    // Inject the desired departure function
-    mixeval->update_departure_function(fit0doc);
-    
-    auto startTime = std::chrono::system_clock::now();
-    LevenbergMarquadtOptions opts;
-    opts.c0 = c0; opts.threading = threading; opts.Nthreads = Nthreads; opts.omega = 0.35;
-    cfinal = LevenbergMarquadt(eval, opts);
-    //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
-    return std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
+    CoeffFitClass CFC(JSON_data_string);
+    CFC.setup(JSON_fit0_string);
+    CFC.run(threading, Nthreads, c0);
+    cfinal = CFC.cfinal();
+    //for (int i = 0; i < cfinal.size(); i += 1) { std::cout << cfinal[i] << std::endl; }
+    return CFC.elapsed_sec();
 }
+
+#ifdef PYBIND11
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+namespace py = pybind11;
+
+PYBIND11_PLUGIN(MixtureCoefficientFitter) {
+    py::module m("MixtureCoefficientFitter", "MixtureCoefficientFitter module");
+
+    // For later(?)
+    //m.def("set_dry_air_defaults", &set_dry_air_defaults, "Set the default air components/composition");
+
+    py::class_<CoeffFitClass>(m, "CoeffFitClass")
+        .def(py::init<const std::string &>())
+        .def("setup", &CoeffFitClass::setup)
+        .def("run", &CoeffFitClass::run)
+        .def("cfinal", &CoeffFitClass::cfinal)
+        .def("elapsed_sec", &CoeffFitClass::elapsed_sec);
+
+    return m.ptr();
+}
+
+#endif
