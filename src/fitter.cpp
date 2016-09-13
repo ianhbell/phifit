@@ -395,7 +395,9 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
     mixeval->update_departure_function(fit0doc);
     
     auto startTime = std::chrono::system_clock::now();
-    cfinal = LevenbergMarquadt(eval, c0, threading, Nthreads);
+    LevenbergMarquadtOptions opts;
+    opts.c0 = c0; opts.threading = threading; opts.Nthreads = Nthreads; opts.omega = 0.35;
+    cfinal = LevenbergMarquadt(eval, opts);
     //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
     return std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
 }
