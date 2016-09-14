@@ -37,6 +37,7 @@ void PhiFitDepartureFunction::update(double tau, double delta)
         {
             double lij = li[j], cij = ci[j], delta_to_lij = pow(delta, lij);
             double mij = mi[j], omegaij = omegai[j], tau_to_mij = pow(tau, mij);
+            u += cij*delta_to_lij + omegaij*tau_to_mij;
             du_ddelta += cij*lij*delta_to_lij;
             d2u_ddelta2 += cij*lij*(lij-1)*delta_to_lij;
             d3u_ddelta3 += cij*lij*(lij-1)*(lij-2)*delta_to_lij;
@@ -46,14 +47,15 @@ void PhiFitDepartureFunction::update(double tau, double delta)
             d3u_dtau3 += omegaij*mij*(mij-1)*(mij-2)*tau_to_mij;
             d4u_dtau4 += omegaij*mij*(mij-1)*(mij-2)*(mij-3)*tau_to_mij;
         }
+        u *= -1;
         du_ddelta *= -one_over_delta;
         d2u_ddelta2 *= -POW2(one_over_delta);
         d3u_ddelta3 *= -POW3(one_over_delta);
         d4u_ddelta4 *= -POW4(one_over_delta);
-        du_dtau *= -one_over_delta;
-        d2u_dtau2 *= -POW2(one_over_delta);
-        d3u_dtau3 *= -POW3(one_over_delta);
-        d4u_dtau4 *= -POW4(one_over_delta);
+        du_dtau *= -one_over_tau;
+        d2u_dtau2 *= -POW2(one_over_tau);
+        d3u_dtau3 *= -POW3(one_over_tau);
+        d4u_dtau4 *= -POW4(one_over_tau);
 
         ndteu = ni*exp(ti*log_tau + di*log_delta + u);
 
