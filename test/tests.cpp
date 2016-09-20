@@ -28,8 +28,8 @@ TEST_CASE("Test fitting betas,gammas", "[simple]") {
     cfinal = CFC.cfinal();
     //for (int i = 0; i < cfinal.size(); i += 1) { std::cout << cfinal[i] << std::endl; }
 
-    REQUIRE(betaT_old - cfinal[0] < 1e-2);
-    REQUIRE(gammaT_old - cfinal[1] < 1e-2);
-    REQUIRE(betaV_old - cfinal[2] < 1e-2);
-    REQUIRE(gammaV_old - cfinal[3] < 1e-2);
+    REQUIRE(betaT_old - cfinal[0] < 1e-3);
+    REQUIRE(gammaT_old - cfinal[1] < 1e-3);
+    REQUIRE(betaV_old - cfinal[2] < 1e-3);
+    REQUIRE(gammaV_old - cfinal[3] < 1e-3);
 }

@@ -33,6 +33,7 @@ public:
     double sum_of_squares();
     /// Return the error vector from the evaluator
     std::vector<double> errorvec();
+    /// Return all the outputs in JSON form, in a form similar to the input JSON structure, plus any additional metadata desired
     std::string dump_outputs_to_JSON() ;
 };
 
