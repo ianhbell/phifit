@@ -38,6 +38,13 @@ public:
     shared_ptr<CoolProp::AbstractState> &get_AS() { return AS; }
 };
 
+/// This class holds common terms for outputs
+class PhiFitOutput : public NumericOutput {
+public:
+    PhiFitOutput(const std::shared_ptr<NumericInput> &in) : NumericOutput(in) {};
+    virtual void to_JSON(rapidjson::Value &, rapidjson::Document &) = 0;
+};
+
 /// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
 /// Does not have any of its own routines
 class PTXYInput : public PhiFitInput
@@ -75,12 +82,12 @@ public:
     void set_rhoV(double rhoV){ this->m_rhoV = rhoV; }
 };
 
-class PTXYOutput : public NumericOutput {
+class PTXYOutput : public PhiFitOutput {
 protected:
     AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
 public:
     PTXYOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : NumericOutput(in), m_evaluator(eval) { };
+        : PhiFitOutput(in), m_evaluator(eval) { };
 
     /// Return the error
     double get_error() { return m_y_calc; };
@@ -167,6 +174,23 @@ public:
         }
         return out;
     }
+    /// Dump this data structure to JSON
+    void to_JSON(rapidjson::Value &list, rapidjson::Document &doc) {
+        
+        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+
+        // Populate the JSON structure
+        rapidjson::Value val;
+        val.SetObject(); 
+        val.AddMember("T (K)", in->T(), doc.GetAllocator());
+        val.AddMember("p (Pa)", in->p(), doc.GetAllocator());
+        val.AddMember("residue ", m_y_calc, doc.GetAllocator());
+        cpjson::set_double_array("x", in->x(), val, doc);
+        cpjson::set_double_array("y", in->y(), val, doc);
+
+        // Add it to the list
+        list.PushBack(val, doc.GetAllocator());
+    }
 };
 
 /// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
@@ -198,28 +222,40 @@ public:
     const std::vector<double> &z() { return m_z; }
 };
 
-class PRhoTOutput : public NumericOutput {
+class PRhoTOutput : public PhiFitOutput {
 protected:
     AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
 public:
     PRhoTOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : NumericOutput(in), m_evaluator(eval) { };
+        : PhiFitOutput(in), m_evaluator(eval) { };
 
     /// Return the error
     double get_error() { return m_y_calc; };
 
     // Do the calculation
     void evaluate_one() {
-        const std::vector<double> &c = m_evaluator->get_const_coefficients();
-        // Resize the row in the Jacobian matrix if needed
-        if (Jacobian_row.size() != c.size()) {
-            resize(c.size());
-        }
+        try{
+            const std::vector<double> &c = m_evaluator->get_const_coefficients();
+            // Resize the row in the Jacobian matrix if needed
+            if (Jacobian_row.size() != c.size()) {
+                resize(c.size());
+            }
         
-        // Evaluate the residual at given coefficients
-        m_y_calc = evaluate(c, false);
-        // Evaluate the analytic derivatives of the residuals with respect to the coefficients
-        analyt_derivs(Jacobian_row);
+            // Evaluate the residual at given coefficients
+            m_y_calc = evaluate(c, false);
+            // Evaluate the analytic derivatives of the residuals with respect to the coefficients
+            analyt_derivs(Jacobian_row);
+        }
+        catch (...) {
+            // Cast abstract input to the derived type so we can access its attributes
+            PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            std::size_t i = 0, j = 1;
+            PhiFitDepartureFunction* dep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+            std::cout << dep->to_JSON_string() << std::endl;
+            m_y_calc = evaluate(m_evaluator->get_const_coefficients(), false);
+            throw;
+        }
 
         //// Numerical derivatives for testing purposes if necessary
         //for (std::size_t i = 0; i < c.size(); ++i) {
@@ -318,6 +354,26 @@ public:
         out.reset(new PRhoTOutput(std::move(in), eval));
         return out;
     }
+    /// Dump this data structure to JSON
+    void to_JSON(rapidjson::Value &list, rapidjson::Document &doc) {
+
+        PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
+        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+
+        // Populate the JSON structure
+        rapidjson::Value val;
+        val.SetObject();
+        val.AddMember("type", "PRhoT", doc.GetAllocator());
+        val.AddMember("T (K)", in->T(), doc.GetAllocator());
+        val.AddMember("p[exp] (Pa)", in->p(), doc.GetAllocator());
+        val.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
+        val.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
+        val.AddMember("residue ", m_y_calc, doc.GetAllocator());
+        cpjson::set_double_array("z", in->z(), val, doc);
+
+        // Add it to the list
+        list.PushBack(val, doc.GetAllocator());
+    }
 };
 
 /// The evaluator class that is used to evaluate the output values from the input values
@@ -349,6 +405,17 @@ public:
             }
         }
     };
+    std::string dump_outputs_to_JSON() {
+        rapidjson::Document doc;
+        doc.SetObject();
+        rapidjson::Value list(rapidjson::kArrayType);
+        for (auto &o : m_outputs) {
+            PhiFitOutput* _out = static_cast<PhiFitOutput*>(o.get());
+            _out->to_JSON(list, doc);
+        }
+        doc.AddMember("data", list, doc.GetAllocator());
+        return cpjson::json2string(doc);
+    }
     void update_departure_function(rapidjson::Value& fit0data) {
         for (auto &out : m_outputs) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
@@ -358,8 +425,23 @@ public:
             HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
             HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
             HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+            i = 1, j = 0;
+            HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+            HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+            HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
             HEOS->set_binary_interaction_double(0, 1, "Fij", 1.0); // Turn on departure term
+            HEOS->set_binary_interaction_double(1, 0, "Fij", 1.0); // Turn on departure term
             int rr = 0;
+        }
+    }
+    std::string departure_function_to_JSON() {
+        for (auto &out : m_outputs) {
+            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
+            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            std::size_t i =0, j=1;
+            PhiFitDepartureFunction* dep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+            return dep->to_JSON_string();
         }
     }
 };
@@ -414,15 +496,34 @@ public:
     void run(bool threading, short Nthreads, const std::vector<double> &c0){
         auto startTime = std::chrono::system_clock::now();
         LevenbergMarquadtOptions opts;
-        opts.c0 = c0; opts.threading = threading; opts.Nthreads = Nthreads; opts.omega = 0.35;
+        opts.c0 = c0; 
+        opts.threading = threading; 
+        opts.Nthreads = Nthreads; 
+        opts.omega = 0.35;
         m_cfinal = LevenbergMarquadt(m_eval, opts);
         //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
         m_elap_sec = std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
+    }
+    /// Just evaluate the residual vector, and cache values internally
+    void evaluate_serial(const std::vector<double> &c0) {
+        m_eval->set_coefficients(c0);
+        m_eval->evaluate_serial(0, m_eval->get_outputs_size(), 0);
     }
     /// Accessor for final values
     std::vector<double> cfinal(){ return m_cfinal; }
     /// Accessor for elapsed time
     double elapsed_sec() { return m_elap_sec; }
+    /// The sum of squares (residual) that is the current best value
+    double sum_of_squares() { return m_eval->get_error_vector().norm(); }
+    /// Return the error vector from the evaluator
+    std::vector<double> errorvec(){
+        const Eigen::VectorXd &vec = m_eval->get_error_vector(); 
+        return std::vector<double>(vec.data(), vec.data() + vec.size());
+    }
+    std::string dump_outputs_to_JSON() {
+        MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
+        return mixeval->dump_outputs_to_JSON();
+    }
 };
 
 /// The function that actually does the fitting - a thin wrapper around the CoeffFitClass
@@ -452,7 +553,11 @@ PYBIND11_PLUGIN(MixtureCoefficientFitter) {
         .def(py::init<const std::string &>())
         .def("setup", &CoeffFitClass::setup)
         .def("run", &CoeffFitClass::run)
+        .def("evaluate_serial", &CoeffFitClass::evaluate_serial)
         .def("cfinal", &CoeffFitClass::cfinal)
+        .def("errorvec", &CoeffFitClass::errorvec)
+        .def("dump_outputs_to_JSON", &CoeffFitClass::dump_outputs_to_JSON)
+        .def("sum_of_squares", &CoeffFitClass::sum_of_squares)
         .def("elapsed_sec", &CoeffFitClass::elapsed_sec);
 
     return m.ptr();
