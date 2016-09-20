@@ -19,7 +19,7 @@ inline void set_string_array(const std::string &key, const std::vector<std::stri
         _v,
         doc.GetAllocator());
 };
-
+// Generate data for the given binary pair, for purposes of fitting betas and gammas
 std::string gen_JSON_data(const std::string &backend, const std::string &names) {
 
     rapidjson::Document doc;
@@ -46,8 +46,8 @@ std::string gen_JSON_data(const std::string &backend, const std::string &names) 
             point.AddMember("type", "PTXY", doc.GetAllocator());
             point.AddMember("p (Pa)", AS->p(), doc.GetAllocator());
             point.AddMember("T (K)", AS->T(), doc.GetAllocator());
-            point.AddMember("rho' (guess,mol/m3)", AS->saturated_liquid_keyed_output(CoolProp::iDmolar), doc.GetAllocator());
-            point.AddMember("rho'' (guess,mol/m3)", AS->saturated_vapor_keyed_output(CoolProp::iDmolar), doc.GetAllocator());
+            point.AddMember("rho' (guess,mol/m3)", -1, doc.GetAllocator());//AS->saturated_liquid_keyed_output(CoolProp::iDmolar), doc.GetAllocator());
+            point.AddMember("rho'' (guess,mol/m3)", -1, doc.GetAllocator());// AS->saturated_vapor_keyed_output(CoolProp::iDmolar), doc.GetAllocator());
             cpjson::set_double_array("x (molar)", x, point, doc);
             cpjson::set_double_array("y (molar)", y, point, doc);
 

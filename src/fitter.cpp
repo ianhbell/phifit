@@ -458,74 +458,63 @@ rapidjson::Document JSON_string_to_rapidjson(const std::string &JSON_string)
     return doc;
 }
 
-class CoeffFitClass
+CoeffFitClass::CoeffFitClass(const std::string &JSON_data_string){
+    // TODO: Validate the JSON against schema
+    rapidjson::Document datadoc = JSON_string_to_rapidjson(JSON_data_string);
+    std::vector<std::string> component_names = cpjson::get_string_array(datadoc["about"], std::string("names"));
+
+    try {
+        std::shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory("HEOS", strjoin(component_names,"&")));
+    }
+    catch(...){
+        auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
+        auto CAS2 = CoolProp::get_fluid_param_string(component_names[1], "CAS");
+        CoolProp::apply_simple_mixing_rule(CAS1, CAS2, "linear");
+    }
+
+    // Instantiate the evaluator
+    m_eval.reset(new MixtureEvaluator());
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
+    mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
+
+}
+void CoeffFitClass::setup(const std::string &JSON_fit0_string)
 {
-public:
-    std::shared_ptr<AbstractEvaluator> m_eval;
-    std::vector<double> m_cfinal;
-    double m_elap_sec;
+    // Make sure string is not empty
+    if (JSON_fit0_string.empty()) { throw CoolProp::ValueError("fit0 string is empty"); }
 
-    CoeffFitClass(const std::string &JSON_data_string){
-        // TODO: Validate the JSON against schema
-        rapidjson::Document datadoc = JSON_string_to_rapidjson(JSON_data_string);
-        std::vector<std::string> component_names = cpjson::get_string_array(datadoc["about"], std::string("names"));
-
-        try {
-            std::shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory("HEOS", strjoin(component_names,"&")));
-        }
-        catch(...){
-            auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
-            auto CAS2 = CoolProp::get_fluid_param_string(component_names[1], "CAS");
-            CoolProp::apply_simple_mixing_rule(CAS1, CAS2, "linear");
-        }
-
-        // Instantiate the evaluator
-        m_eval.reset(new MixtureEvaluator());
-        MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
-        mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
-
-    }
-    void setup(const std::string &JSON_fit0_string)
-    {
-        // TODO: Validate the JSON against schema
-        rapidjson::Document fit0doc = JSON_string_to_rapidjson(JSON_fit0_string);
+    // TODO: Validate the JSON against schema
+    rapidjson::Document fit0doc = JSON_string_to_rapidjson(JSON_fit0_string);
         
-        // Inject the desired departure function
-        MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
-        mixeval->update_departure_function(fit0doc);
-    }
-    void run(bool threading, short Nthreads, const std::vector<double> &c0){
-        auto startTime = std::chrono::system_clock::now();
-        LevenbergMarquadtOptions opts;
-        opts.c0 = c0; 
-        opts.threading = threading; 
-        opts.Nthreads = Nthreads; 
-        opts.omega = 0.35;
-        m_cfinal = LevenbergMarquadt(m_eval, opts);
-        //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
-        m_elap_sec = std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
-    }
-    /// Just evaluate the residual vector, and cache values internally
-    void evaluate_serial(const std::vector<double> &c0) {
-        m_eval->set_coefficients(c0);
-        m_eval->evaluate_serial(0, m_eval->get_outputs_size(), 0);
-    }
-    /// Accessor for final values
-    std::vector<double> cfinal(){ return m_cfinal; }
-    /// Accessor for elapsed time
-    double elapsed_sec() { return m_elap_sec; }
-    /// The sum of squares (residual) that is the current best value
-    double sum_of_squares() { return m_eval->get_error_vector().norm(); }
-    /// Return the error vector from the evaluator
-    std::vector<double> errorvec(){
-        const Eigen::VectorXd &vec = m_eval->get_error_vector(); 
-        return std::vector<double>(vec.data(), vec.data() + vec.size());
-    }
-    std::string dump_outputs_to_JSON() {
-        MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
-        return mixeval->dump_outputs_to_JSON();
-    }
-};
+    // Inject the desired departure function
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+    mixeval->update_departure_function(fit0doc);
+}
+void CoeffFitClass::run(bool threading, short Nthreads, const std::vector<double> &c0){
+    auto startTime = std::chrono::system_clock::now();
+    LevenbergMarquadtOptions opts;
+    opts.c0 = c0; 
+    opts.threading = threading; 
+    opts.Nthreads = Nthreads; 
+    opts.omega = 0.35;
+    m_cfinal = LevenbergMarquadt(m_eval, opts);
+    //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
+    m_elap_sec = std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
+}
+/// Just evaluate the residual vector, and cache values internally
+void CoeffFitClass::evaluate_serial(const std::vector<double> &c0) {
+    m_eval->set_coefficients(c0);
+    m_eval->evaluate_serial(0, m_eval->get_outputs_size(), 0);
+}
+double CoeffFitClass::sum_of_squares() { return m_eval->get_error_vector().norm(); }
+std::vector<double> CoeffFitClass::errorvec(){
+    const Eigen::VectorXd &vec = m_eval->get_error_vector(); 
+    return std::vector<double>(vec.data(), vec.data() + vec.size());
+}
+std::string CoeffFitClass::dump_outputs_to_JSON() {
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
+    return mixeval->dump_outputs_to_JSON();
+}
 
 /// The function that actually does the fitting - a thin wrapper around the CoeffFitClass
 double simplefit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading, short Nthreads, std::vector<double> &c0, std::vector<double> &cfinal)

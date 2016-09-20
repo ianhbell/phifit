@@ -4,7 +4,36 @@
 #include <vector>
 #include <string>
 
+// Includes from NISTfit
+#include "NISTfit/abc.h"
+
 /// The function that actually does the fitting
 double simplefit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading, short Nthreads, std::vector<double> &c0, std::vector<double> &cfinal);
+
+class CoeffFitClass
+{
+public:
+    std::shared_ptr<NISTfit::AbstractEvaluator> m_eval;
+    std::vector<double> m_cfinal;
+    double m_elap_sec;
+
+    /// Instantiator
+    CoeffFitClass(const std::string &JSON_data_string);
+    /// Setup the departure function
+    void setup(const std::string &JSON_fit0_string);
+    /// Run the optimizer
+    void run(bool threading, short Nthreads, const std::vector<double> &c0);
+    /// Just evaluate the residual vector, and cache values internally
+    void evaluate_serial(const std::vector<double> &c0);
+    /// Accessor for final values
+    std::vector<double> cfinal() { return m_cfinal; }
+    /// Accessor for elapsed time
+    double elapsed_sec() { return m_elap_sec; }
+    /// The sum of squares (residual) that is the current best value
+    double sum_of_squares();
+    /// Return the error vector from the evaluator
+    std::vector<double> errorvec();
+    std::string dump_outputs_to_JSON() ;
+};
 
 #endif
