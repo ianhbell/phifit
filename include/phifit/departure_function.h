@@ -8,10 +8,11 @@ class PhiFitDepartureFunction : public CoolProp::DepartureFunction
 {
 private:
     std::vector<double> n, t, d;
-    std::vector<std::vector<double> > c, l, omega, m;
+    std::vector<std::vector<double> > cdelta, ldelta, ctau, ltau;
 public:
     PhiFitDepartureFunction(rapidjson::Value &JSON_data) ;
     void update(double tau, double delta);
+    std::string to_JSON_string();
 };
 
 #endif

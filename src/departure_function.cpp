@@ -1,13 +1,41 @@
 #include "phifit/departure_function.h"
-
+#include "rapidjson_include.h"
 PhiFitDepartureFunction::PhiFitDepartureFunction(rapidjson::Value &JSON_data) {
     n = cpjson::get_double_array(JSON_data, "n");
     t = cpjson::get_double_array(JSON_data, "t");
     d = cpjson::get_double_array(JSON_data, "d");
-    c = cpjson::get_double_array2D(JSON_data["c"]);
-    l = cpjson::get_double_array2D(JSON_data["l"]);
-    omega = cpjson::get_double_array2D(JSON_data["omega"]);
-    m = cpjson::get_double_array2D(JSON_data["m"]);
+    cdelta = cpjson::get_double_array2D(JSON_data["cdelta"]);
+    ldelta = cpjson::get_double_array2D(JSON_data["ldelta"]);
+    ctau = cpjson::get_double_array2D(JSON_data["ctau"]);
+    ltau = cpjson::get_double_array2D(JSON_data["ltau"]);
+
+    // Check the values for the coefficients in the exponential
+    double max_cdelta = -1e20, max_ctau = -1e20;
+    for (std::size_t i = 0; i < cdelta.size(); ++i) {
+        for (std::size_t j = 0; j < cdelta[i].size(); ++j) {
+            max_cdelta = std::max(cdelta[i][j], max_cdelta);
+        }
+    }
+    for (std::size_t i = 0; i < ctau.size(); ++i) {
+        for (std::size_t j = 0; j < ctau[i].size(); ++j) {
+            max_cdelta = std::max(ctau[i][j], max_cdelta);
+        }
+    }
+    if (max_cdelta > 0.0) { throw CoolProp::ValueError("All coefficients of cdelta MUST be non-positive"); }
+    if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau MUST be non-positive"); }
+}
+
+std::string PhiFitDepartureFunction::to_JSON_string() {
+    rapidjson::Document doc;
+    doc.SetObject();
+    cpjson::set_double_array("n", n, doc, doc);
+    cpjson::set_double_array("t", t, doc, doc);
+    cpjson::set_double_array("d", d, doc, doc);
+    cpjson::set_array2D("cdelta", cdelta, doc, doc);
+    cpjson::set_array2D("ldelta", ldelta, doc, doc);
+    cpjson::set_array2D("ctau", ctau, doc, doc);
+    cpjson::set_array2D("ltau", ltau, doc, doc);
+    return cpjson::json2string(doc);
 }
 
 void PhiFitDepartureFunction::update(double tau, double delta)
@@ -20,7 +48,7 @@ void PhiFitDepartureFunction::update(double tau, double delta)
     for (std::size_t i = 0; i < n.size(); ++i)
     {
         CoolPropDbl ni = n[i], di = d[i], ti = t[i];
-        const std::vector<double> &ci = c[i], li = l[i], omegai = omega[i], mi = m[i];
+        const std::vector<double> &cdeltai = cdelta[i], &ldeltai = ldelta[i], &ctaui = ctau[i], &ltaui = ltau[i];
 
         // Set the u part of exp(u) to zero
         CoolPropDbl u = 0;
@@ -33,29 +61,32 @@ void PhiFitDepartureFunction::update(double tau, double delta)
         CoolPropDbl d4u_ddelta4 = 0;
         CoolPropDbl d4u_dtau4 = 0;
 
-        for (std::size_t j = 0; j < l[0].size(); ++j) 
+        for (std::size_t j = 0; j < ldeltai.size(); ++j)
         {
-            double lij = li[j], cij = ci[j], delta_to_lij = pow(delta, lij);
-            double mij = mi[j], omegaij = omegai[j], tau_to_mij = pow(tau, mij);
-            u += cij*delta_to_lij + omegaij*tau_to_mij;
-            du_ddelta += cij*lij*delta_to_lij;
-            d2u_ddelta2 += cij*lij*(lij-1)*delta_to_lij;
-            d3u_ddelta3 += cij*lij*(lij-1)*(lij-2)*delta_to_lij;
-            d4u_ddelta4 += cij*lij*(lij-1)*(lij-2)*(lij-3)*delta_to_lij;
-            du_dtau += omegaij*mij*tau_to_mij;
-            d2u_dtau2 += omegaij*mij*(mij-1)*tau_to_mij;
-            d3u_dtau3 += omegaij*mij*(mij-1)*(mij-2)*tau_to_mij;
-            d4u_dtau4 += omegaij*mij*(mij-1)*(mij-2)*(mij-3)*tau_to_mij;
+            const double ldeltaij = ldeltai[j], cdeltaij = cdeltai[j], delta_to_lij = pow(delta, ldeltaij);
+            u += cdeltaij*delta_to_lij;
+            du_ddelta += cdeltaij*ldeltaij*delta_to_lij;
+            d2u_ddelta2 += cdeltaij*ldeltaij*(ldeltaij -1)*delta_to_lij;
+            d3u_ddelta3 += cdeltaij*ldeltaij*(ldeltaij -1)*(ldeltaij -2)*delta_to_lij;
+            d4u_ddelta4 += cdeltaij*ldeltaij*(ldeltaij -1)*(ldeltaij -2)*(ldeltaij -3)*delta_to_lij;
         }
-        u *= -1;
-        du_ddelta *= -one_over_delta;
-        d2u_ddelta2 *= -POW2(one_over_delta);
-        d3u_ddelta3 *= -POW3(one_over_delta);
-        d4u_ddelta4 *= -POW4(one_over_delta);
-        du_dtau *= -one_over_tau;
-        d2u_dtau2 *= -POW2(one_over_tau);
-        d3u_dtau3 *= -POW3(one_over_tau);
-        d4u_dtau4 *= -POW4(one_over_tau);
+        for (std::size_t j = 0; j < ltaui.size(); ++j){
+            const double ltauij = ltaui[j], ctauij = ctaui[j], tau_to_mij = pow(tau, ltauij); 
+            u += ctauij*tau_to_mij;
+            du_dtau += ctauij*ltauij*tau_to_mij;
+            d2u_dtau2 += ctauij*ltauij*(ltauij -1)*tau_to_mij;
+            d3u_dtau3 += ctauij*ltauij*(ltauij -1)*(ltauij -2)*tau_to_mij;
+            d4u_dtau4 += ctauij*ltauij*(ltauij -1)*(ltauij -2)*(ltauij -3)*tau_to_mij;
+        }
+        u *= 1;
+        du_ddelta *= one_over_delta;
+        d2u_ddelta2 *= POW2(one_over_delta);
+        d3u_ddelta3 *= POW3(one_over_delta);
+        d4u_ddelta4 *= POW4(one_over_delta);
+        du_dtau *= one_over_tau;
+        d2u_dtau2 *= POW2(one_over_tau);
+        d3u_dtau3 *= POW3(one_over_tau);
+        d4u_dtau4 *= POW4(one_over_tau);
 
         ndteu = ni*exp(ti*log_tau + di*log_delta + u);
 
