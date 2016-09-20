@@ -182,6 +182,7 @@ public:
         // Populate the JSON structure
         rapidjson::Value val;
         val.SetObject(); 
+        val.AddMember("type", "PTXY", doc.GetAllocator());
         val.AddMember("T (K)", in->T(), doc.GetAllocator());
         val.AddMember("p (Pa)", in->p(), doc.GetAllocator());
         val.AddMember("residue ", m_y_calc, doc.GetAllocator());
