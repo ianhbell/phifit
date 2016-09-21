@@ -1,6 +1,7 @@
 #include "crossplatform_shared_ptr.h"
 #include "AbstractState.h"
 #include "rapidjson_include.h"
+#include "phifit/data_generation.h"
 
 ////   *************************************************************************
 ////   *************************** THE TESTS  **********************************
@@ -20,7 +21,7 @@ inline void set_string_array(const std::string &key, const std::vector<std::stri
         doc.GetAllocator());
 };
 // Generate data for the given binary pair, for purposes of fitting betas and gammas
-std::string gen_JSON_data(const std::string &backend, const std::string &names) {
+std::string gen_JSON_data(const std::string &backend, const std::string &names, gen_JSON_data_options options) {
 
     rapidjson::Document doc;
     doc.SetObject();
@@ -34,8 +35,8 @@ std::string gen_JSON_data(const std::string &backend, const std::string &names) 
     shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory(backend, names));
 
     rapidjson::Value v_data(rapidjson::kArrayType);
-    for (double T = 200; T < 250; T += 20) {
-        for (double x0 = 0.1; x0 < 0.91; x0 += 0.4) {
+    for (double T = options.Tmin; T < options.Tmax; T += 20) {
+        for (double x0 =options.x0min; x0 < options.x0max; x0 += 0.4) {
             std::vector<double> x(2, x0); x[1] = 1 - x[0];
             AS->set_mole_fractions(x);
             AS->update(CoolProp::QT_INPUTS, 0, T);

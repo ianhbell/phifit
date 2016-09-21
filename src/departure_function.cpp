@@ -11,18 +11,24 @@ PhiFitDepartureFunction::PhiFitDepartureFunction(rapidjson::Value &JSON_data) {
 
     // Check the values for the coefficients in the exponential
     double max_cdelta = -1e20, max_ctau = -1e20;
+    // Check the coefficients for delta
     for (std::size_t i = 0; i < cdelta.size(); ++i) {
         for (std::size_t j = 0; j < cdelta[i].size(); ++j) {
-            max_cdelta = std::max(cdelta[i][j], max_cdelta);
+            if (ldelta[i][j] > 0){ // Only check non-constant terms
+                max_cdelta = std::max(cdelta[i][j], max_cdelta);
+            }
         }
     }
+    // Check the coefficients for tau
     for (std::size_t i = 0; i < ctau.size(); ++i) {
         for (std::size_t j = 0; j < ctau[i].size(); ++j) {
-            max_cdelta = std::max(ctau[i][j], max_cdelta);
+            if (ltau[i][j] != 0) { // Only check non-constant terms
+                max_ctau = std::max(ctau[i][j], max_ctau);
+            }
         }
     }
-    if (max_cdelta > 0.0) { throw CoolProp::ValueError("All coefficients of cdelta MUST be non-positive"); }
-    if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau MUST be non-positive"); }
+    if (max_cdelta > 0.0) { throw CoolProp::ValueError("All coefficients of cdelta with non-zero power MUST be non-positive"); }
+    if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau with non-zero power MUST be non-positive"); }
 }
 
 std::string PhiFitDepartureFunction::to_JSON_string() {
