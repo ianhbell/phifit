@@ -17,6 +17,7 @@
 #include "Backends/Helmholtz/MixtureParameters.h"
 #include "Backends/Helmholtz/HelmholtzEOSMixtureBackend.h"
 #include "Backends/Helmholtz/ReducingFunctions.h"
+#include "Backends/Helmholtz/MixtureDerivatives.h"
 
 // Includes from c++
 #include <iostream>
@@ -85,6 +86,8 @@ public:
 class PTXYOutput : public PhiFitOutput {
 protected:
     AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
+    std::vector<double> JtempL, ///< A temporary buffer for holding the liquid evaluation of derivatives w.r.t. coefficients
+                        JtempV; ///< A temporary buffer for holding the vapor evaluation of derivatives w.r.t. coefficients
 public:
     PTXYOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
         : PhiFitOutput(in), m_evaluator(eval) { };
@@ -96,15 +99,34 @@ public:
     void evaluate_one() {
         const std::vector<double> &c = m_evaluator->get_const_coefficients();
         // Resize the row in the Jacobian matrix if needed
-        if (Jacobian_row.size() != c.size()) {
-            resize(c.size());
+        std::size_t N = c.size();
+        if (Jacobian_row.size() != N) {
+            resize(N);
         }
+        if (JtempL.size() != N){ JtempL.resize(N); }
+        if (JtempV.size() != N) { JtempV.resize(N); }
+
         // Evaluate the residual at given coefficients
         m_y_calc = evaluate(c, false); 
+
+        // Cast abstract input to the derived type so we can access its attributes
+        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+
+        std::size_t i = 0;
+        evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
+        evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
+        evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
+        evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
+        
         for (std::size_t i = 0; i < c.size(); ++i) {
-            // Numerical derivatives :(
-            Jacobian_row[i] = der(i, 0.00001);
+            // Numerical derivatives for checking purposes
+            // ------------
+            //Jacobian_row[i] = der_num(i, 0.00001);
+
+            Jacobian_row[i] = JtempV[i] - JtempL[i];
         }
+
     }
     double evaluate(const std::vector<double> &c, bool update_densities = false) {
         
@@ -118,31 +140,132 @@ public:
         HEOS->set_binary_interaction_double(0,1,"betaV",c[2]);
         HEOS->set_binary_interaction_double(0,1,"gammaV",c[3]);
 
-        HEOS->SatL->set_mole_fractions(in->x());
-        double RT = HEOS->SatL->gas_constant()*in->T();
-        if (in->rhoL() < 0){
-            HEOS->SatL->update(CoolProp::PT_INPUTS,  in->p(), in->T());
-        }
-        else{
-            HEOS->SatL->update_TP_guessrho(in->T(), in->p(), in->rhoL());
-        }
-        double mu0L = HEOS->SatL->chemical_potential(0)/RT;
-        if (update_densities) { in->set_rhoL(HEOS->SatL->rhomolar()); }
+        // Calculate the chemical potentials for liquid and vapor
+        std::size_t i = 0;
+        double muL = mu_over_RT(HEOS->SatL.get(), in->x(), i);
+        double muV = mu_over_RT(HEOS->SatV.get(), in->y(), i);
         
-        HEOS->SatV->set_mole_fractions(in->y());
-        if (in->rhoV() < 0){
-            HEOS->SatV->update(CoolProp::PT_INPUTS, in->p(), in->T());
+        // Update the densities if requested
+        if (update_densities) { 
+            in->set_rhoV(HEOS->SatV->rhomolar());
+            in->set_rhoL(HEOS->SatL->rhomolar());
         }
-        else{
-            HEOS->SatV->update_TP_guessrho(in->T(), in->p(), in->rhoV());
-        }
-        double mu0V = HEOS->SatV->chemical_potential(0)/RT;
-        if (update_densities) { in->set_rhoV(HEOS->SatV->rhomolar()); }
-        
-        return mu0V - mu0L;
+        return muV - muL;
     }
+    double mu_over_RT(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i) {
+        // Cast abstract input to the derived type so we can access its attributes
+        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+
+        HEOS->set_mole_fractions(z);
+        if (in->rhoV() < 0) {
+            HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
+        }
+        else {
+            HEOS->update_TP_guessrho(in->T(), in->p(), in->rhoV());
+        }
+
+        return HEOS->chemical_potential(i)/(HEOS->gas_constant()*HEOS->T());
+    }
+    void evaluate_mu0_over_RT_derivatives(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i, std::vector<double> & buffer) {
+        // Cast abstract input to the derived type so we can access its attributes
+        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+
+        // Zero out the buffer
+        buffer[0] = 0; buffer[1] = 0; buffer[2] = 0; buffer[3] = 0;
+
+        double dtau_dbetaT__constTP = GERG->dTr_dbetaT(z) / HEOS->T();
+        double dtau_dgammaT__constTP = GERG->dTr_dgammaT(z) / HEOS->T();
+
+        double ddelta_dbetaT__constTP = -POW2(HEOS->delta())*HEOS->d2alphar_dDelta_dTau()*dtau_dbetaT__constTP / (1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2());
+        double ddelta_dgammaT__constTP = -POW2(HEOS->delta())*HEOS->d2alphar_dDelta_dTau()*dtau_dgammaT__constTP / (1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2());
+        double ddelta_dbetaV__constTP = -HEOS->delta()*(1 + HEOS->delta()*HEOS->dalphar_dDelta())*GERG->drhormolar_dbetaV(z) / (HEOS->rhomolar_reducing()*(1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2()));
+        double ddelta_dgammaV__constTP = -HEOS->delta()*(1 + HEOS->delta()*HEOS->dalphar_dDelta())*GERG->drhormolar_dgammaV(z) / (HEOS->rhomolar_reducing()*(1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2()));
+
+        double rhor = HEOS->rhomolar_reducing();
+        double rhoci = HEOS->get_fluid_constant(i, CoolProp::irhomolar_critical);
+        double delta_oi = HEOS->delta()*rhor/rhoci;
+        double ddelta_oi_ddelta = rhor/rhoci;
+        double ddeltaoi_dbetaV__consttaudelta = HEOS->delta()/rhoci*GERG->drhormolar_dbetaV(z);
+        double ddeltaoi_dgammaV__consttaudelta = HEOS->delta()/rhoci*GERG->drhormolar_dgammaV(z);
+        
+        double Tr = HEOS->T_reducing();
+        double Tci = HEOS->get_fluid_constant(i, CoolProp::iT_critical);
+        double tau_oi = HEOS->tau()*Tci/Tr;
+        double dtau_oi_dtau = Tci/Tr; 
+        double dtauoi_dbetaT__consttaudelta = -HEOS->tau()*Tci/POW2(Tr)*GERG->dTr_dbetaT(z);
+        double dtauoi_dgammaT__consttaudelta = -HEOS->tau()*Tci/POW2(Tr)*GERG->dTr_dgammaT(z);
+        
+        double dalpha0oi_ddeltaoi = HEOS->get_components()[i].EOS().alpha0.dDelta(tau_oi, delta_oi);
+        double dY0_ddelta__consttau = dalpha0oi_ddeltaoi*ddelta_oi_ddelta;
+        double dY0_dbetaV_constdeltatau = dalpha0oi_ddeltaoi*ddeltaoi_dbetaV__consttaudelta;
+        double dY0_dgammaV_constdeltatau = dalpha0oi_ddeltaoi*ddeltaoi_dgammaV__consttaudelta;
+
+        double dalpha0oi_dtauoi = HEOS->get_components()[i].EOS().alpha0.dTau(tau_oi, delta_oi);
+        double dY0_dtau__constdelta = dalpha0oi_dtauoi*dtau_oi_dtau;
+        double dY0_dbetaT_constdeltatau = dalpha0oi_dtauoi*dtauoi_dbetaT__consttaudelta;
+        double dY0_dgammaT_constdeltatau = dalpha0oi_dtauoi*dtauoi_dgammaT__consttaudelta;
+
+        // buffer is derivatives of mu_i/RT w.r.t. betaT, gammaT, betaV, gammaV in order, starting with the zero index
+        // First we calculate just the ideal-gas part
+        buffer[0] = dY0_ddelta__consttau*ddelta_dbetaT__constTP  + dY0_dtau__constdelta*dtau_dbetaT__constTP  + dY0_dbetaT_constdeltatau;
+        buffer[1] = dY0_ddelta__consttau*ddelta_dgammaT__constTP + dY0_dtau__constdelta*dtau_dgammaT__constTP + dY0_dgammaT_constdeltatau;
+        buffer[2] = dY0_ddelta__consttau*ddelta_dbetaV__constTP                                               + dY0_dbetaV_constdeltatau;
+        buffer[3] = dY0_ddelta__consttau*ddelta_dgammaV__constTP                                              + dY0_dgammaV_constdeltatau;
+    }
+    void evaluate_mur_over_RT_derivatives(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i, std::vector<double> & buffer){
+
+        // Buffer already partially filled from ideal-gas contribution
+
+        // Cast abstract input to the derived type so we can access its attributes
+        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+
+        double rhor = HEOS->rhomolar_reducing();
+        double Tr = HEOS->T_reducing();
+
+        double dY_ddelta__consttau = HEOS->dalphar_dDelta() + CoolProp::MixtureDerivatives::d_ndalphardni_dDelta(*HEOS, i, CoolProp::XN_INDEPENDENT);
+        double dY_dtau__constdelta = HEOS->dalphar_dTau() + CoolProp::MixtureDerivatives::d_ndalphardni_dTau(*HEOS, i, CoolProp::XN_INDEPENDENT);
+
+        double dtau_dbetaT__constTP = GERG->dTr_dbetaT(z) / HEOS->T();
+        double dtau_dgammaT__constTP = GERG->dTr_dgammaT(z) / HEOS->T();
+
+        double ddelta_dbetaT__constTP = -POW2(HEOS->delta())*HEOS->d2alphar_dDelta_dTau()*dtau_dbetaT__constTP/(1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2());
+        double ddelta_dgammaT__constTP = -POW2(HEOS->delta())*HEOS->d2alphar_dDelta_dTau()*dtau_dgammaT__constTP/(1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2());
+        double ddelta_dbetaV__constTP = -HEOS->delta()*(1 + HEOS->delta()*HEOS->dalphar_dDelta())*GERG->drhormolar_dbetaV(z) / (HEOS->rhomolar_reducing()*(1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2()));
+        double ddelta_dgammaV__constTP = -HEOS->delta()*(1 + HEOS->delta()*HEOS->dalphar_dDelta())*GERG->drhormolar_dgammaV(z) / (HEOS->rhomolar_reducing()*(1 + 2 * HEOS->delta()*HEOS->dalphar_dDelta() + POW2(HEOS->delta())*HEOS->d2alphar_dDelta2()));
+
+        double d_ndrhordni_dbetaV = GERG->d2rhormolar_dxidbetaV(z, i, CoolProp::XN_INDEPENDENT);
+        for (std::size_t k = 0; k < z.size(); ++k) {
+            d_ndrhordni_dbetaV -= z[k] * GERG->d2rhormolar_dxidbetaV(z, k, CoolProp::XN_INDEPENDENT);
+        }
+        double d_ndrhordni_dgammaV = GERG->d2rhormolar_dxidgammaV(z, i, CoolProp::XN_INDEPENDENT);
+        for (std::size_t k = 0; k < z.size(); ++k) {
+            d_ndrhordni_dgammaV -= z[k] * GERG->d2rhormolar_dxidgammaV(z, k, CoolProp::XN_INDEPENDENT);
+        }
+        double d_ndTrdni_dbetaT = GERG->d2Tr_dxidbetaT(z, i, CoolProp::XN_INDEPENDENT);
+        for (std::size_t k = 0; k < z.size(); ++k) {
+            d_ndTrdni_dbetaT -= z[k] * GERG->d2Tr_dxidbetaT(z, k, CoolProp::XN_INDEPENDENT);
+        }
+        double d_ndTrdni_dgammaT = GERG->d2Tr_dxidgammaT(z, i, CoolProp::XN_INDEPENDENT);
+        for (std::size_t k = 0; k < z.size(); ++k) {
+            d_ndTrdni_dgammaT -= z[k] * GERG->d2Tr_dxidgammaT(z, k, CoolProp::XN_INDEPENDENT);
+        }
+
+        double dY_dbetaV_constdeltatau = -HEOS->delta()*HEOS->dalphar_dDelta()/rhor*(d_ndrhordni_dbetaV - GERG->ndrhorbardni__constnj(z, i, CoolProp::XN_INDEPENDENT) / rhor*GERG->drhormolar_dbetaV(z));
+        double dY_dgammaV_constdeltatau = -HEOS->delta()*HEOS->dalphar_dDelta()/rhor*(d_ndrhordni_dgammaV - GERG->ndrhorbardni__constnj(z, i, CoolProp::XN_INDEPENDENT) / rhor*GERG->drhormolar_dgammaV(z));
+        double dY_dbetaT_constdeltatau = HEOS->tau()*HEOS->dalphar_dTau()/Tr*(d_ndTrdni_dbetaT - GERG->ndTrdni__constnj(z, i, CoolProp::XN_INDEPENDENT)/Tr*GERG->dTr_dbetaT(z));
+        double dY_dgammaT_constdeltatau = HEOS->tau()*HEOS->dalphar_dTau()/Tr*(d_ndTrdni_dgammaT - GERG->ndTrdni__constnj(z, i, CoolProp::XN_INDEPENDENT)/Tr*GERG->dTr_dgammaT(z));
+
+        // Add contributions from the residual part
+        buffer[0] += dY_ddelta__consttau*ddelta_dbetaT__constTP  + dY_dtau__constdelta*dtau_dbetaT__constTP  + dY_dbetaT_constdeltatau;
+        buffer[1] += dY_ddelta__consttau*ddelta_dgammaT__constTP + dY_dtau__constdelta*dtau_dgammaT__constTP + dY_dgammaT_constdeltatau;
+        buffer[2] += dY_ddelta__consttau*ddelta_dbetaV__constTP                                              + dY_dbetaV_constdeltatau;
+        buffer[3] += dY_ddelta__consttau*ddelta_dgammaV__constTP                                             + dY_dgammaV_constdeltatau;
+    }
+
     /// Numerical derivative of the residual term
-    double der(std::size_t i, double dc) {
+    double der_num(std::size_t i, double dc) {
         const std::vector<double> &c0 = m_evaluator->get_const_coefficients();
         std::vector<double> cp = c0, cm = c0;
         cp[i] += dc; cm[i] -= dc;
@@ -435,6 +558,38 @@ public:
             int rr = 0;
         }
     }
+    void set_n(const std::vector<double> &n) {
+        for (auto &out : m_outputs) {
+            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
+            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            std::size_t i = 0, j = 1;
+            PhiFitDepartureFunction* p;
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
+            i = 1, j = 0;
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
+        }
+    }
+    void set_nt(const std::vector<double> &n, const std::vector<double> &t) {
+        for (auto &out : m_outputs) {
+            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
+            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            std::size_t i = 0, j = 1;
+            PhiFitDepartureFunction* p;
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+            i = 1, j = 0;
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+        }
+    }
     std::string departure_function_to_JSON() {
         for (auto &out : m_outputs) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
@@ -490,6 +645,18 @@ void CoeffFitClass::setup(const std::string &JSON_fit0_string)
     MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
     mixeval->update_departure_function(fit0doc);
 }
+void CoeffFitClass::set_n(const std::vector<double> &n)
+{
+    // Inject the desired n coefficients
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+    mixeval->set_n(n);
+}
+void CoeffFitClass::set_nt(const std::vector<double> &n, const std::vector<double> &t)
+{
+    // Inject the desired coefficients for n and t
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+    mixeval->set_nt(n,t);
+}
 void CoeffFitClass::run(bool threading, short Nthreads, const std::vector<double> &c0){
     auto startTime = std::chrono::system_clock::now();
     LevenbergMarquadtOptions opts;
@@ -505,6 +672,11 @@ void CoeffFitClass::run(bool threading, short Nthreads, const std::vector<double
 void CoeffFitClass::evaluate_serial(const std::vector<double> &c0) {
     m_eval->set_coefficients(c0);
     m_eval->evaluate_serial(0, m_eval->get_outputs_size(), 0);
+}
+/// Just evaluate the residual vector, and cache values internally
+void CoeffFitClass::evaluate_parallel(const std::vector<double> &c0, short Nthreads) {
+    m_eval->set_coefficients(c0);
+    m_eval->evaluate_parallel(Nthreads);
 }
 double CoeffFitClass::sum_of_squares() { return m_eval->get_error_vector().norm(); }
 std::vector<double> CoeffFitClass::errorvec(){
@@ -531,6 +703,7 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 namespace py = pybind11;
 
 PYBIND11_PLUGIN(MixtureCoefficientFitter) {
@@ -542,7 +715,10 @@ PYBIND11_PLUGIN(MixtureCoefficientFitter) {
     py::class_<CoeffFitClass>(m, "CoeffFitClass")
         .def(py::init<const std::string &>())
         .def("setup", &CoeffFitClass::setup)
+        .def("set_n", &CoeffFitClass::set_n)
+        .def("set_nt", &CoeffFitClass::set_nt)
         .def("run", &CoeffFitClass::run)
+        .def("evaluate_parallel", &CoeffFitClass::evaluate_parallel)
         .def("evaluate_serial", &CoeffFitClass::evaluate_serial)
         .def("cfinal", &CoeffFitClass::cfinal)
         .def("errorvec", &CoeffFitClass::errorvec)

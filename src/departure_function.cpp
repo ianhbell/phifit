@@ -27,8 +27,8 @@ PhiFitDepartureFunction::PhiFitDepartureFunction(rapidjson::Value &JSON_data) {
             }
         }
     }
-    if (max_cdelta > 0.0) { throw CoolProp::ValueError("All coefficients of cdelta with non-zero power MUST be non-positive"); }
-    if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau with non-zero power MUST be non-positive"); }
+    //if (max_cdelta > 0.0) { throw CoolProp::ValueError("All coefficients of cdelta with non-zero power MUST be non-positive"); }
+    //if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau with non-zero power MUST be non-positive"); }
 }
 
 std::string PhiFitDepartureFunction::to_JSON_string() {
@@ -37,10 +37,10 @@ std::string PhiFitDepartureFunction::to_JSON_string() {
     cpjson::set_double_array("n", n, doc, doc);
     cpjson::set_double_array("t", t, doc, doc);
     cpjson::set_double_array("d", d, doc, doc);
-    cpjson::set_array2D("cdelta", cdelta, doc, doc);
-    cpjson::set_array2D("ldelta", ldelta, doc, doc);
-    cpjson::set_array2D("ctau", ctau, doc, doc);
-    cpjson::set_array2D("ltau", ltau, doc, doc);
+    cpjson::set_double_array2D("cdelta", cdelta, doc, doc);
+    cpjson::set_double_array2D("ldelta", ldelta, doc, doc);
+    cpjson::set_double_array2D("ctau", ctau, doc, doc);
+    cpjson::set_double_array2D("ltau", ltau, doc, doc);
     return cpjson::json2string(doc);
 }
 

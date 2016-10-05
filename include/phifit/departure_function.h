@@ -13,6 +13,8 @@ public:
     PhiFitDepartureFunction(rapidjson::Value &JSON_data) ;
     void update(double tau, double delta);
     std::string to_JSON_string();
+    void set_n(const std::vector<double> &n) { this->n = n ; }
+    void set_nt(const std::vector<double> &n, const std::vector<double> &t) { this->n = n; this->t = t; }
 };
 
 #endif

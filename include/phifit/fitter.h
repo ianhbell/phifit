@@ -21,10 +21,16 @@ public:
     CoeffFitClass(const std::string &JSON_data_string);
     /// Setup the departure function
     void setup(const std::string &JSON_fit0_string);
+    /// Setup the departure function
+    void set_n(const std::vector<double> &n);
+    /// Setup the departure function
+    void set_nt(const std::vector<double> &n, const std::vector<double> &t);
     /// Run the optimizer
     void run(bool threading, short Nthreads, const std::vector<double> &c0);
-    /// Just evaluate the residual vector, and cache values internally
+    /// Just evaluate the residual vector (serially), and cache values internally
     void evaluate_serial(const std::vector<double> &c0);
+    /// Just evaluate the residual vector (in parallel), and cache values internally
+    void evaluate_parallel(const std::vector<double> &c0, short Nthreads);
     /// Accessor for final values
     std::vector<double> cfinal() { return m_cfinal; }
     /// Accessor for elapsed time
