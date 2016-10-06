@@ -133,12 +133,11 @@ public:
         // Cast abstract input to the derived type so we can access its attributes
         PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
         CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-
-        // Set the BIP in main instance and its children
-        HEOS->set_binary_interaction_double(0,1,"betaT",c[0]);
-        HEOS->set_binary_interaction_double(0,1,"gammaT",c[1]);
-        HEOS->set_binary_interaction_double(0,1,"betaV",c[2]);
-        HEOS->set_binary_interaction_double(0,1,"gammaV",c[3]);
+        
+        CoolProp::GERG2008ReducingFunction *GERGL = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->SatL->Reducing.get());
+        GERGL->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
+        CoolProp::GERG2008ReducingFunction *GERGV = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->SatV->Reducing.get());
+        GERGV->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
 
         // Calculate the chemical potentials for liquid and vapor
         std::size_t i = 0;
@@ -393,18 +392,22 @@ public:
         PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
         CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
 
-        // Set the BIP in main instance and its children
-        HEOS->set_binary_interaction_double(0, 1, "betaT", c[0]);
-        HEOS->set_binary_interaction_double(0, 1, "gammaT", c[1]);
-        HEOS->set_binary_interaction_double(0, 1, "betaV", c[2]);
-        HEOS->set_binary_interaction_double(0, 1, "gammaV", c[3]);
+        // Set the BIP in main instance
+        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
 
         // Set the mole fractions
         HEOS->set_mole_fractions(in->z());
         // Calculate p = f(T,rho)
         HEOS->update_DmolarT_direct(in->rhomolar(), in->T());
-        // Return residual as (p_calc - p_exp)/rho_exp*drhodP_exp
-        return (HEOS->p() - in->p())/in->rhomolar()*HEOS->first_partial_deriv(CoolProp::iDmolar, CoolProp::iP, CoolProp::iT);
+        // The derivative dpdrho__T (needs to be positive always for homogenous states!)
+        double dpdrho__T = HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT);
+        // This penalty function is added to avoid negative derivatives
+        double penalty = (dpdrho__T > 0) ? 0 : std::abs(dpdrho__T);
+        // Pressures should be positive, penalize negative pressures
+        penalty += (HEOS->p() > 0) ? 0 : -HEOS->p();
+        // Return residual as (p_calc - p_exp)/rho_exp*drhodP_exp|T 
+        return (HEOS->p() - in->p())/in->rhomolar()/dpdrho__T + penalty;
     }
     void analyt_derivs(std::vector<double> &J) {
         
@@ -491,6 +494,7 @@ public:
         val.AddMember("T (K)", in->T(), doc.GetAllocator());
         val.AddMember("p[exp] (Pa)", in->p(), doc.GetAllocator());
         val.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
+        val.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
         val.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
         val.AddMember("residue ", m_y_calc, doc.GetAllocator());
         cpjson::set_double_array("z", in->z(), val, doc);
