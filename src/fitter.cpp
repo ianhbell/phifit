@@ -487,16 +487,32 @@ public:
         CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
 
         // Populate the JSON structure
-        rapidjson::Value val;
-        val.SetObject();
-        val.AddMember("type", "PRhoT", doc.GetAllocator());
+        rapidjson::Value val; val.SetObject();
+        val.AddMember("type", "PRhoT", doc.GetAllocator()); 
         val.AddMember("T (K)", in->T(), doc.GetAllocator());
-        val.AddMember("p[exp] (Pa)", in->p(), doc.GetAllocator());
-        val.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
-        val.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
+        val.AddMember("p (Pa)", in->p(), doc.GetAllocator());
         val.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
-        val.AddMember("residue", m_y_calc, doc.GetAllocator());
         cpjson::set_double_array("z", in->z(), val, doc);
+        val.AddMember("residue", m_y_calc, doc.GetAllocator());
+        
+        // Calculations with DT as inputs (what we are doing here)
+        rapidjson::Value calc_DT; calc_DT.SetObject();
+        calc_DT.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
+        calc_DT.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
+        calc_DT.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
+        val.AddMember("calc_DT", calc_DT, doc.GetAllocator());
+
+        // Calculations with PT as inputs
+        rapidjson::Value calc_PT; calc_PT.SetObject();
+        try{
+            HEOS->update_TP_guessrho(in->T(), in->p(), in->rhomolar());
+            calc_PT.AddMember("rhomolar (mol/m3)", HEOS->rhomolar(), doc.GetAllocator()); 
+        }
+        catch (std::exception &e) {
+            std::cout << e.what() << std::endl;
+            calc_PT.AddMember("rhomolar (mol/m3)", -1, doc.GetAllocator());
+        }
+        val.AddMember("calc_PT", calc_PT, doc.GetAllocator());
 
         // Add it to the list
         list.PushBack(val, doc.GetAllocator());
