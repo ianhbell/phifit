@@ -375,7 +375,6 @@ public:
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
             std::size_t i = 0, j = 1;
             PhiFitDepartureFunction* dep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
-            std::cout << dep->to_JSON_string() << std::endl;
             m_y_calc = evaluate(m_evaluator->get_const_coefficients(), false);
             throw;
         }
@@ -407,7 +406,7 @@ public:
         // Pressures should be positive, penalize negative pressures
         penalty += (HEOS->p() > 0) ? 0 : -HEOS->p();
         // Return residual as (p_calc - p_exp)/rho_exp*drhodP_exp|T 
-        return (HEOS->p() - in->p())/in->rhomolar()/dpdrho__T + penalty;
+        return (HEOS->p() - in->p())/in->rhomolar()/dpdrho__T;// + penalty;
     }
     void analyt_derivs(std::vector<double> &J) {
         
@@ -496,7 +495,7 @@ public:
         val.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
         val.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
         val.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
-        val.AddMember("residue ", m_y_calc, doc.GetAllocator());
+        val.AddMember("residue", m_y_calc, doc.GetAllocator());
         cpjson::set_double_array("z", in->z(), val, doc);
 
         // Add it to the list
@@ -534,14 +533,25 @@ public:
         }
     };
     std::string dump_outputs_to_JSON() {
+        // Construct the output document
         rapidjson::Document doc;
         doc.SetObject();
+
+        // Get the list of outputs, store as "data"
         rapidjson::Value list(rapidjson::kArrayType);
         for (auto &o : m_outputs) {
-            PhiFitOutput* _out = static_cast<PhiFitOutput*>(o.get());
-            _out->to_JSON(list, doc);
+            static_cast<PhiFitOutput*>(o.get())->to_JSON(list, doc);
         }
         doc.AddMember("data", list, doc.GetAllocator());
+
+        // Get the departure function
+        NumericOutput *_out = static_cast<NumericOutput *>(m_outputs[0].get());
+        PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+        PhiFitDepartureFunction* pdep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[0][1].get());
+        rapidjson::Value dep = pdep->to_JSON(doc);
+        doc.AddMember("departure[i][j]", dep, doc.GetAllocator());
+
         return cpjson::json2string(doc);
     }
     void update_departure_function(rapidjson::Value& fit0data) {
@@ -549,17 +559,13 @@ public:
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-            std::size_t i = 0, j = 1;
-            HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
-            HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
-            HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
-            i = 1, j = 0;
-            HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
-            HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
-            HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
-            HEOS->set_binary_interaction_double(0, 1, "Fij", 1.0); // Turn on departure term
-            HEOS->set_binary_interaction_double(1, 0, "Fij", 1.0); // Turn on departure term
-            int rr = 0;
+            for (std::size_t i = 0; i <= 1; ++i){
+                std::size_t j = 1 - i;
+                HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+                HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+                HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(fit0data["departure[ij]"]));
+                HEOS->set_binary_interaction_double(i, j, "Fij", 1.0); // Turn on departure term
+            }
         }
     }
     void set_n(const std::vector<double> &n) {
@@ -601,7 +607,8 @@ public:
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
             std::size_t i =0, j=1;
             PhiFitDepartureFunction* dep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
-            return dep->to_JSON_string();
+            rapidjson::Document doc;
+            return cpjson::json2string(dep->to_JSON(doc));
         }
     }
 };

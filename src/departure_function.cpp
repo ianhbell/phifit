@@ -31,17 +31,16 @@ PhiFitDepartureFunction::PhiFitDepartureFunction(rapidjson::Value &JSON_data) {
     //if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau with non-zero power MUST be non-positive"); }
 }
 
-std::string PhiFitDepartureFunction::to_JSON_string() {
-    rapidjson::Document doc;
-    doc.SetObject();
-    cpjson::set_double_array("n", n, doc, doc);
-    cpjson::set_double_array("t", t, doc, doc);
-    cpjson::set_double_array("d", d, doc, doc);
-    cpjson::set_double_array2D("cdelta", cdelta, doc, doc);
-    cpjson::set_double_array2D("ldelta", ldelta, doc, doc);
-    cpjson::set_double_array2D("ctau", ctau, doc, doc);
-    cpjson::set_double_array2D("ltau", ltau, doc, doc);
-    return cpjson::json2string(doc);
+rapidjson::Value PhiFitDepartureFunction::to_JSON(rapidjson::Document &doc) {
+    rapidjson::Value val; val.SetObject();
+    cpjson::set_double_array("n", n, val, doc);
+    cpjson::set_double_array("t", t, val, doc);
+    cpjson::set_double_array("d", d, val, doc);
+    cpjson::set_double_array2D("cdelta", cdelta, val, doc);
+    cpjson::set_double_array2D("ldelta", ldelta, val, doc);
+    cpjson::set_double_array2D("ctau", ctau, val, doc);
+    cpjson::set_double_array2D("ltau", ltau, val, doc);
+    return val;
 }
 
 void PhiFitDepartureFunction::update(double tau, double delta)
