@@ -167,7 +167,6 @@ public:
     }
     void evaluate_mu0_over_RT_derivatives(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i, std::vector<double> & buffer) {
         // Cast abstract input to the derived type so we can access its attributes
-        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
         CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
 
         // Zero out the buffer
@@ -217,7 +216,6 @@ public:
         // Buffer already partially filled from ideal-gas contribution
 
         // Cast abstract input to the derived type so we can access its attributes
-        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
         CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
 
         double rhor = HEOS->rhomolar_reducing();
@@ -370,11 +368,6 @@ public:
             analyt_derivs(Jacobian_row);
         }
         catch (...) {
-            // Cast abstract input to the derived type so we can access its attributes
-            PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
-            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-            std::size_t i = 0, j = 1;
-            PhiFitDepartureFunction* dep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
             m_y_calc = evaluate(m_evaluator->get_const_coefficients(), false);
             throw;
         }
@@ -624,7 +617,8 @@ public:
             std::size_t i =0, j=1;
             PhiFitDepartureFunction* dep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
             rapidjson::Document doc;
-            return cpjson::json2string(dep->to_JSON(doc));
+            rapidjson::Value val = dep->to_JSON(doc);
+            return cpjson::json2string(val);
         }
     }
 };
