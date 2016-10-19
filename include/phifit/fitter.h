@@ -7,6 +7,9 @@
 // Includes from NISTfit
 #include "NISTfit/abc.h"
 
+// Includes from phifit
+#include "phifit/data_structures.h"
+
 /// The function that actually does the fitting
 double simplefit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading, short Nthreads, std::vector<double> &c0, std::vector<double> &cfinal);
 
@@ -21,10 +24,8 @@ public:
     CoeffFitClass(const std::string &JSON_data_string);
     /// Setup the departure function
     void setup(const std::string &JSON_fit0_string);
-    /// Setup the departure function
-    void set_n(const std::vector<double> &n);
-    /// Setup the departure function
-    void set_nt(const std::vector<double> &n, const std::vector<double> &t);
+    /// Setup the departure function using coefficients passed as a Coefficients class instance
+    void setup(const Coefficients &coeffs);
     /// Run the optimizer
     void run(bool threading, short Nthreads, const std::vector<double> &c0);
     /// Just evaluate the residual vector (serially), and cache values internally

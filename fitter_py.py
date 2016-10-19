@@ -37,6 +37,8 @@ def get_data():
     all_JSON_data['data'] += Smolen_data['data']
     all_JSON_data['data'] += Harms_data['data']
 
+    #all_JSON_data['data'] = all_JSON_data['data'][0::4] # every fourth data point
+
     # Use the new EOS from Kehui and Eric
     all_JSON_data['about']['names'] = ['Ammonia(Hui)','Water']
 
@@ -44,23 +46,24 @@ def get_data():
     return all_JSON_data
 
 cfc = MCF.CoeffFitClass(json.dumps(get_data()))
-coeffs = [1,1,1,1]
 
 for i in range(1):
     departure = departure0.copy()
     cfc.setup(json.dumps(departure))
 
-    if i == 0:
-        cfc.setup(json.dumps(departure))
-        cfc.evaluate_serial([0.911640, 0.9111660, 1.0541730, 1.3223907])
-        with open('baseline.json', 'w') as fp:
-            fp.write(json.dumps(json.loads(cfc.dump_outputs_to_JSON()), indent = 2, sort_keys = True))
-        print('BASELINE:', cfc.sum_of_squares()**0.5)
+    # if i == 0:
+    #     cfc.setup(json.dumps(departure))
+    #     cfc.evaluate_serial([0.911640, 0.9111660, 1.0541730, 1.3223907])
+    #     with open('baseline.json', 'w') as fp:
+    #         fp.write(json.dumps(json.loads(cfc.dump_outputs_to_JSON()), indent = 2, sort_keys = True))
+    #     print('BASELINE:', cfc.sum_of_squares()**0.5)
     
     Nterms = 13
     Npoly = 9
     Nexp_tau = 0
     Nexp_delta = 3
+
+    coeffs = MCF.Coefficients()
 
     if i > 0:
         departure['departure[ij]']['n'] = (random_dist((1, Nterms), -5, 5)).tolist()[0]
@@ -76,15 +79,16 @@ for i in range(1):
         if isinstance(x, np.ndarray):
             x = x.tolist()
         N = len(x)
-        coeffs = x[0:4]
-        departure['departure[ij]']['n'] = x[4:4+Nterms]
-        departure['departure[ij]']['t'] = x[4+Nterms:4+2*Nterms]
-        departure['departure[ij]']['d'] = x[4+2*Nterms:4+3*Nterms]
-        departure['departure[ij]']['ldelta'][0:Npoly] = [[_] for _ in x[4+3*Nterms:4+3*Nterms+Npoly]]
-        cfc.setup(json.dumps(departure))
+        betagamma = x[0:4]
+        coeffs.n = x[4:4+Nterms]
+        coeffs.t = x[4+Nterms:4+2*Nterms]
+        coeffs.d = x[4+2*Nterms:4+3*Nterms]
+        coeffs.ldelta = [[_] for _ in x[4+3*Nterms:4+3*Nterms+Npoly]] + departure['departure[ij]']['ldelta'][Npoly::]
+        cfc.setup(coeffs)
+
         try:
-            #cfc.evaluate_serial(coeffs)
-            cfc.evaluate_parallel(coeffs, 4)
+            #cfc.evaluate_serial(betagamma)
+            cfc.evaluate_parallel(betagamma, 4)
             err = cfc.sum_of_squares()**0.5
             if err < 0.1 or write_JSON:
                 jj = json.loads(cfc.dump_outputs_to_JSON())
@@ -98,11 +102,13 @@ for i in range(1):
             print('XX', BE)
             return 1e10
 
-    # N = 200
-    # n = np.array(departure['departure[ij]']['n'])
+    # Generate a set of inputs that can be passed to objective function
+    x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d'] + [_[0] for _ in departure['departure[ij]']['ldelta']]
+
+    # N = 20
     # tic = time.clock()
     # for i in range(N):
-    #     objective(n, departure, cfc)
+    #     objective(x0, departure, cfc, Nterms, Npoly)
     # toc = time.clock()
     # print((toc-tic)/N, 's/eval')
     # sys.exit(-1)
@@ -116,14 +122,13 @@ for i in range(1):
     ldelta_bounds = [(0,3)]*Npoly
     bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds
 
-    # Minimize using deap
-    minimize_deap(objective, bounds, args=(departure, cfc, Nterms, Npoly))
+    # Minimize using deap (global optimization using evolutionary optimization)
+    # minimize_deap(objective, bounds, args=(departure, cfc, Nterms, Npoly))
     
     # Differential evolution (global optimization)
-    #result = scipy.optimize.differential_evolution(objective, bounds, args=(departure, cfc, Nterms, Npoly), disp = True)
+    # result = scipy.optimize.differential_evolution(objective, bounds, args=(departure, cfc, Nterms, Npoly), disp = True)
 
     # Nelder-Mead (local optimization)
-    x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d'] + [_[0] for _ in departure['departure[ij]']['ldelta']]
     result = scipy.optimize.minimize(objective, x0, method='Nelder-Mead', args=(departure, cfc, Nterms, Npoly), options=dict(maxiter = 12000))
     print ('xfinal:', result.x)
     #objective(result.x, departure, cfc, Nterms, Npoly, write_JSON = True)

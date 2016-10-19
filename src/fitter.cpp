@@ -577,36 +577,21 @@ public:
             }
         }
     }
-    void set_n(const std::vector<double> &n) {
+    void update_departure_function(const Coefficients& coeffs) {
         for (auto &out : m_outputs) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-            std::size_t i = 0, j = 1;
-            PhiFitDepartureFunction* p;
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
-            i = 1, j = 0;
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_n(n);
-        }
-    }
-    void set_nt(const std::vector<double> &n, const std::vector<double> &t) {
-        for (auto &out : m_outputs) {
-            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
-            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
-            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-            std::size_t i = 0, j = 1;
-            PhiFitDepartureFunction* p;
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
-            i = 1, j = 0;
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
-            p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get()); p->set_nt(n,t);
+            for (std::size_t i = 0; i <= 1; ++i) {
+                std::size_t j = 1 - i;
+                PhiFitDepartureFunction* p;
+                p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+                p->update_coeffs(coeffs);
+                p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+                p->update_coeffs(coeffs);
+                p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+                p->update_coeffs(coeffs);
+            }
         }
     }
     std::string departure_function_to_JSON() {
@@ -654,6 +639,11 @@ CoeffFitClass::CoeffFitClass(const std::string &JSON_data_string){
     mixeval->add_terms("HEOS", strjoin(component_names, "&"), datadoc["data"]);
 
 }
+void CoeffFitClass::setup(const Coefficients &coeffs){
+    // Inject the desired departure function
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+    mixeval->update_departure_function(coeffs);
+}
 void CoeffFitClass::setup(const std::string &JSON_fit0_string)
 {
     // Make sure string is not empty
@@ -665,18 +655,6 @@ void CoeffFitClass::setup(const std::string &JSON_fit0_string)
     // Inject the desired departure function
     MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
     mixeval->update_departure_function(fit0doc);
-}
-void CoeffFitClass::set_n(const std::vector<double> &n)
-{
-    // Inject the desired n coefficients
-    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
-    mixeval->set_n(n);
-}
-void CoeffFitClass::set_nt(const std::vector<double> &n, const std::vector<double> &t)
-{
-    // Inject the desired coefficients for n and t
-    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
-    mixeval->set_nt(n,t);
 }
 void CoeffFitClass::run(bool threading, short Nthreads, const std::vector<double> &c0){
     auto startTime = std::chrono::system_clock::now();
@@ -724,20 +702,25 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <pybind11/numpy.h>
 namespace py = pybind11;
 
 PYBIND11_PLUGIN(MixtureCoefficientFitter) {
     py::module m("MixtureCoefficientFitter", "MixtureCoefficientFitter module");
 
-    // For later(?)
-    //m.def("set_dry_air_defaults", &set_dry_air_defaults, "Set the default air components/composition");
+    py::class_<Coefficients>(m, "Coefficients")
+        .def(py::init<>())
+        .def_readwrite("n", &Coefficients::n)
+        .def_readwrite("t", &Coefficients::t)
+        .def_readwrite("d", &Coefficients::d)
+        .def_readwrite("ltau", &Coefficients::ltau)
+        .def_readwrite("ctau", &Coefficients::ctau)
+        .def_readwrite("ldelta", &Coefficients::ldelta)
+        .def_readwrite("cdelta", &Coefficients::cdelta);
 
     py::class_<CoeffFitClass>(m, "CoeffFitClass")
         .def(py::init<const std::string &>())
-        .def("setup", &CoeffFitClass::setup)
-        .def("set_n", &CoeffFitClass::set_n)
-        .def("set_nt", &CoeffFitClass::set_nt)
+        .def("setup", (void (CoeffFitClass::*)(const std::string &)) &CoeffFitClass::setup)
+        .def("setup", (void (CoeffFitClass::*)(const Coefficients &)) &CoeffFitClass::setup)
         .def("run", &CoeffFitClass::run)
         .def("evaluate_parallel", &CoeffFitClass::evaluate_parallel)
         .def("evaluate_serial", &CoeffFitClass::evaluate_serial)
