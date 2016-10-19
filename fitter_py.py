@@ -2,7 +2,8 @@
 Simple script to do the optimization
 """
 from __future__ import print_function
-import time, json
+import time, json, random
+from operator import attrgetter
 
 # Munge the python path to make it load our module we compiled using pybind11
 import sys
@@ -11,6 +12,9 @@ import MixtureCoefficientFitter as MCF
 
 # Other imports (conda installable packages)
 import numpy as np, matplotlib.pyplot as plt, pandas, scipy.optimize
+
+# Our deap optimization routine
+from deap_optimize import minimize_deap
 
 def random_dist(dims, minval, maxval):
     return (maxval-minval)*np.random.random(dims) + minval
@@ -69,8 +73,8 @@ for i in range(1):
         departure['departure[ij]']['ctau'] = [[0] for _ in range(Npoly)] + [(random_dist((1, Nexp_tau), -2,0)).tolist()[0] for j in range(Nterms-Npoly)]
 
     def objective(x, departure, cfc, Nterms, Npoly, write_JSON = False):
-        
-        x = x.tolist()
+        if isinstance(x, np.ndarray):
+            x = x.tolist()
         N = len(x)
         coeffs = x[0:4]
         departure['departure[ij]']['n'] = x[4:4+Nterms]
@@ -104,19 +108,23 @@ for i in range(1):
     # sys.exit(-1)
     # print(objective(n, departure, cfc))
     # sys.exit(-1)
-    
+        
+    coeffs_bounds = [(0.1, 1.5) for _ in range(4)]
+    n_bounds = [(-5, 5)]*Nterms
+    t_bounds = [(0.25, 5)]*Nterms
+    d_bounds = [(0.25, 4)]*Nterms
+    ldelta_bounds = [(0,3)]*Npoly
+    bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds
 
-    # # Differential evolution (global optimization)
-    # coeffs_bounds = [(0.1, 1.5) for _ in range(4)]
-    # n_bounds = [(-5, 5)]*Nterms
-    # t_bounds = [(0.25, 5)]*Nterms
-    # d_bounds = [(0.25, 4)]*Nterms
-    # ldelta_bounds = [(0,3)]*Npoly
-    # bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds
-    # result = scipy.optimize.differential_evolution(objective, bounds, args=(departure, cfc, Nterms, Npoly), disp = True)
+    # Minimize using deap
+    minimize_deap(objective, bounds, args=(departure, cfc, Nterms, Npoly))
+    
+    # Differential evolution (global optimization)
+    #result = scipy.optimize.differential_evolution(objective, bounds, args=(departure, cfc, Nterms, Npoly), disp = True)
 
     # Nelder-Mead (local optimization)
     x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d'] + [_[0] for _ in departure['departure[ij]']['ldelta']]
     result = scipy.optimize.minimize(objective, x0, method='Nelder-Mead', args=(departure, cfc, Nterms, Npoly), options=dict(maxiter = 12000))
     print ('xfinal:', result.x)
-    objective(result.x, departure, cfc, Nterms, Npoly, write_JSON = True)
+    #objective(result.x, departure, cfc, Nterms, Npoly, write_JSON = True)
+

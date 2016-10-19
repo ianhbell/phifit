@@ -1,3 +1,4 @@
 /build
 /_private
 /*.json
+/deap_optimize.pyc
