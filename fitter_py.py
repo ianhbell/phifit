@@ -3,7 +3,7 @@ Simple script to do the optimization
 """
 from __future__ import print_function
 import time, json, random
-from operator import attrgetter
+
 
 # Munge the python path to make it load our module we compiled using pybind11
 import sys
@@ -60,20 +60,8 @@ for i in range(1):
     
     Nterms = 13
     Npoly = 9
-    Nexp_tau = 0
-    Nexp_delta = 3
 
     coeffs = MCF.Coefficients()
-
-    if i > 0:
-        departure['departure[ij]']['n'] = (random_dist((1, Nterms), -5, 5)).tolist()[0]
-        departure['departure[ij]']['t'] = (random_dist((1, Nterms), 0.2, 2.5)).tolist()[0]
-        departure['departure[ij]']['d'] = (np.floor(random_dist((1, Nterms), 0, 4))).tolist()[0]
-
-        departure['departure[ij]']['ldelta'] = [[_] for _ in random_dist((1, Npoly), 0,3).tolist()[0]] + [range(Nexp_delta-1,-1,-1) for j in range(Nterms-Npoly)]
-        departure['departure[ij]']['cdelta'] = [[-1] for _ in range(Npoly)] + [(random_dist((1, Nexp_delta), -2,0)).tolist()[0] for j in range(Nterms-Npoly)]
-        departure['departure[ij]']['ltau'] = [[0] for _ in range(Npoly)] + [(np.floor(random_dist((1, Nexp_tau), 0, 4))).tolist()[0] for j in range(Nterms-Npoly)]
-        departure['departure[ij]']['ctau'] = [[0] for _ in range(Npoly)] + [(random_dist((1, Nexp_tau), -2,0)).tolist()[0] for j in range(Nterms-Npoly)]
 
     def objective(x, departure, cfc, Nterms, Npoly, write_JSON = False):
         if isinstance(x, np.ndarray):
@@ -87,7 +75,6 @@ for i in range(1):
         cfc.setup(coeffs)
 
         try:
-            #cfc.evaluate_serial(betagamma)
             cfc.evaluate_parallel(betagamma, 4)
             err = cfc.sum_of_squares()**0.5
             if err < 0.1 or write_JSON:
@@ -112,24 +99,35 @@ for i in range(1):
     # toc = time.clock()
     # print((toc-tic)/N, 's/eval')
     # sys.exit(-1)
-    # print(objective(n, departure, cfc))
-    # sys.exit(-1)
         
     coeffs_bounds = [(0.1, 1.5) for _ in range(4)]
     n_bounds = [(-5, 5)]*Nterms
     t_bounds = [(0.25, 5)]*Nterms
-    d_bounds = [(0.25, 4)]*Nterms
+    d_bounds = [(0.25, 6)]*Nterms
     ldelta_bounds = [(0,3)]*Npoly
     bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds
+    args=(departure, cfc, Nterms, Npoly)
 
     # Minimize using deap (global optimization using evolutionary optimization)
-    # minimize_deap(objective, bounds, args=(departure, cfc, Nterms, Npoly))
+    results = minimize_deap(objective, bounds, Nindividuals=7000, Ngenerations=20, args=args)
+    # Serialize the hall of fame
+    with open('hof.json', 'w') as fp:
+        fp.write(json.dumps([{'c': list(ind), 'fitness': ind.fitness.values} for ind in results['hof']], indent = 2))
+    # Refine the solutions for each individual
+    for iind, ind in enumerate(results['hof']):
+        print ('ind:', ind)
+        # Then try to run Nelder-Mead minimization from each promising point in the hall of fame
+        # Many options for algorithms here, but Nelder-Mead is well-regarded for its stability (though
+        # perhaps not its speed)
+        r = scipy.optimize.minimize(objective, ind, method='Nelder-Mead', args=args, options=dict(maxiter = 5000, maxfev = 20000))
+        print ('xfinal:', r.x)
+        with open('soln{i:04d}.json'.format(i=iind), 'w') as fp:
+            fp.write(json.dumps(json.loads(cfc.dump_outputs_to_JSON()), indent=2))
     
     # Differential evolution (global optimization)
     # result = scipy.optimize.differential_evolution(objective, bounds, args=(departure, cfc, Nterms, Npoly), disp = True)
 
     # Nelder-Mead (local optimization)
-    result = scipy.optimize.minimize(objective, x0, method='Nelder-Mead', args=(departure, cfc, Nterms, Npoly), options=dict(maxiter = 12000))
-    print ('xfinal:', result.x)
-    #objective(result.x, departure, cfc, Nterms, Npoly, write_JSON = True)
+    # result = scipy.optimize.minimize(objective, x0, method='Nelder-Mead', args=(departure, cfc, Nterms, Npoly), options=dict(maxiter = 12000))
+    # print ('xfinal:', result.x)
 
