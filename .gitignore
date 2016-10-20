@@ -2,3 +2,4 @@
 /_private
 /*.json
 /deap_optimize.pyc
+*.pyc
