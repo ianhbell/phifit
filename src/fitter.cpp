@@ -305,7 +305,7 @@ public:
         val.AddMember("type", "PTXY", doc.GetAllocator());
         val.AddMember("T (K)", in->T(), doc.GetAllocator());
         val.AddMember("p (Pa)", in->p(), doc.GetAllocator());
-        val.AddMember("residue ", m_y_calc, doc.GetAllocator());
+        val.AddMember("residue", m_y_calc, doc.GetAllocator());
         cpjson::set_double_array("x", in->x(), val, doc);
         cpjson::set_double_array("y", in->y(), val, doc);
 
@@ -492,10 +492,9 @@ public:
         rapidjson::Value calc_DT; calc_DT.SetObject();
         calc_DT.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
         calc_DT.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
-        calc_DT.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
         val.AddMember("calc_DT", calc_DT, doc.GetAllocator());
 
-        // Calculations with PT as inputs
+        // Calculations with PT as inputs (the opposite calculation)
         rapidjson::Value calc_PT; calc_PT.SetObject();
         try{
             HEOS->update_TP_guessrho(in->T(), in->p(), in->rhomolar());
