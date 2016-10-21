@@ -63,6 +63,10 @@ for i in range(1):
 
     coeffs = MCF.Coefficients()
 
+    def chunks(l, n):
+        n = max(1, n)
+        return [l[i:i+n] for i in xrange(0, len(l), n)]
+
     def objective(x, departure, cfc, Nterms, Npoly, write_JSON = False):
         if isinstance(x, np.ndarray):
             x = x.tolist()
@@ -72,6 +76,7 @@ for i in range(1):
         coeffs.t = x[4+Nterms:4+2*Nterms]
         coeffs.d = x[4+2*Nterms:4+3*Nterms]
         coeffs.ldelta = [[_] for _ in x[4+3*Nterms:4+3*Nterms+Npoly]] + departure['departure[ij]']['ldelta'][Npoly::]
+        coeffs.cdelta = departure['departure[ij]']['cdelta'][0:Npoly] + chunks(x[4+3*Nterms+Npoly:4+3*Nterms+Npoly+3*(Nterms-Npoly)+1], 3)
         cfc.setup(coeffs)
 
         try:
@@ -90,7 +95,10 @@ for i in range(1):
             return 1e10
 
     # Generate a set of inputs that can be passed to objective function
-    x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d'] + [_[0] for _ in departure['departure[ij]']['ldelta']]
+    x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d']
+    x0 += [_[0] for _ in departure['departure[ij]']['ldelta'][0:Npoly]]
+    for els in departure['departure[ij]']['cdelta'][Npoly::]:
+        x0 += els
 
     # N = 20
     # tic = time.clock()
@@ -105,7 +113,8 @@ for i in range(1):
     t_bounds = [(0.25, 5)]*Nterms
     d_bounds = [(0.25, 6)]*Nterms
     ldelta_bounds = [(0,3)]*Npoly
-    bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds
+    cdelta_bounds = [(-5,5)]*(Nterms-Npoly)*3
+    bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds + cdelta_bounds
     args=(departure, cfc, Nterms, Npoly)
 
     # Minimize using deap (global optimization using evolutionary optimization)
