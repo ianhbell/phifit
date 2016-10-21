@@ -704,6 +704,45 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
 #include <pybind11/stl.h>
 namespace py = pybind11;
 
+CoolProp::AbstractState * factory(const std::string &backend, const std::string &fluid_names) {
+    try {
+        return CoolProp::AbstractState::factory(backend, fluid_names);
+    }
+    catch (...) {
+        auto component_names = strsplit(fluid_names, '&');
+        auto CAS1 = CoolProp::get_fluid_param_string(component_names[0], "CAS");
+        auto CAS2 = CoolProp::get_fluid_param_string(component_names[1], "CAS");
+        CoolProp::apply_simple_mixing_rule(CAS1, CAS2, "linear");
+    }
+    return CoolProp::AbstractState::factory(backend, fluid_names);
+}
+
+void set_departure_function(CoolProp::AbstractState * AS, std::string &departure_JSON_string){
+    rapidjson::Document doc; doc.SetObject();
+    cpjson::JSON_string_to_rapidjson(departure_JSON_string, doc);
+    CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(AS);
+    for (std::size_t i = 0; i <= 1; ++i) {
+        std::size_t j = 1 - i;
+        HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(doc));
+        HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(doc));
+        HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].reset(new PhiFitDepartureFunction(doc));
+        HEOS->set_binary_interaction_double(i, j, "Fij", 1.0); // Turn on departure term
+    }
+}
+void update_departure_function(CoolProp::AbstractState *AS, const Coefficients &coeffs) {
+    CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(AS);
+    for (std::size_t i = 0; i <= 1; ++i) {
+        std::size_t j = 1 - i;
+        PhiFitDepartureFunction* p;
+        p = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+        p->update_coeffs(coeffs);
+        p = static_cast<PhiFitDepartureFunction*>(HEOS->SatL->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+        p->update_coeffs(coeffs);
+        p = static_cast<PhiFitDepartureFunction*>(HEOS->SatV->residual_helmholtz->Excess.DepartureFunctionMatrix[i][j].get());
+        p->update_coeffs(coeffs);
+    }
+}
+
 PYBIND11_PLUGIN(MixtureCoefficientFitter) {
     py::module m("MixtureCoefficientFitter", "MixtureCoefficientFitter module");
 
@@ -729,6 +768,36 @@ PYBIND11_PLUGIN(MixtureCoefficientFitter) {
         .def("dump_outputs_to_JSON", &CoeffFitClass::dump_outputs_to_JSON)
         .def("sum_of_squares", &CoeffFitClass::sum_of_squares)
         .def("elapsed_sec", &CoeffFitClass::elapsed_sec);
+    {
+
+        using namespace CoolProp;
+
+        py::class_<SimpleState>(m, "SimpleState")
+            .def(py::init<>())
+            .def_readwrite("T", &SimpleState::T)
+            .def_readwrite("p", &SimpleState::p)
+            .def_readwrite("rhomolar", &SimpleState::rhomolar);
+
+        py::class_<CriticalState, SimpleState>(m, "CriticalState")
+            .def_readwrite("stable", &CriticalState::stable);
+
+        py::enum_<input_pairs>(m, "input_pairs")
+            .value("PT_INPUTS", input_pairs::PT_INPUTS)
+            .value("PQ_INPUTS", input_pairs::PQ_INPUTS)
+            .value("QT_INPUTS", input_pairs::QT_INPUTS)
+            .value("DmolarT_INPUTS", input_pairs::DmolarT_INPUTS);
+
+        py::class_<AbstractState>(m, "AbstractState")
+            .def("update", &AbstractState::update)
+            .def("hmolar_excess", &AbstractState::hmolar_excess)
+            .def("T_critical", &AbstractState::T_critical)
+            .def("all_critical_points", &AbstractState::all_critical_points)
+            .def("set_mole_fractions", &AbstractState::set_mole_fractions);
+
+        m.def("factory", &factory);
+        m.def("set_departure_function", &set_departure_function);
+        m.def("update_departure_function", &update_departure_function);
+    }
 
     return m.ptr();
 }
