@@ -548,7 +548,7 @@ mm_H2O = 0.018015268
 for segment in [B11,B12,B13,B14]:
     for chunk in segment.replace(',','.').split('\n@@\n'):
         header = chunk.split('\n')[0]
-        p_kPa,rho_kgm3 = [],[]
+        p_kPa,rho_kgm3,rho_moldm3 = [],[],[]
         headbits = header.split(' ')
         T = float(headbits[2])
         xNH3 = float(headbits[5])
@@ -560,6 +560,7 @@ for segment in [B11,B12,B13,B14]:
             for i in range(0, len(pieces), 2):
                 p_kPa.append(float(pieces[i]))
                 rho_kgm3.append(float(pieces[i+1]))
+                rho_moldm3.append(float(pieces[i+1])/molemass/1000.0)
                 
                 pt = {'p (Pa)': float(pieces[i])*1e3,
                       'rho (kg/m3)': float(pieces[i+1]),
@@ -569,9 +570,11 @@ for segment in [B11,B12,B13,B14]:
                       'type': "PRhoT"
                       }
                 data.append(pt)
-        rho_kgm3,p_kPa = zip(*sorted(zip(rho_kgm3, p_kPa)))
-        plt.plot(rho_kgm3, p_kPa, label=header)
+        rho_kgm3,rho_moldm3,p_kPa = zip(*sorted(zip(rho_kgm3,rho_moldm3, p_kPa)))
+        plt.plot(rho_moldm3, p_kPa, label=header)
 #plt.legend()    
+plt.xlabel(r'$\rho$ (mol/dm$^3$)')
+plt.ylabel('$p$ (kPa)')
 plt.show()
 
 for chunk in B2.replace(',','.').split('\n@@\n'):
@@ -595,8 +598,10 @@ for chunk in B2.replace(',','.').split('\n@@\n'):
                   }
             data.append(pt)
     v_dm3mol,p_kPa = zip(*sorted(zip(v_dm3mol, p_kPa)))
-    plt.plot(v_dm3mol, p_kPa, label=header)
+    plt.plot(1/np.array(v_dm3mol), p_kPa, label=header)
 plt.legend()
+plt.xlabel(r'$\rho$ (mol/dm$^3$)')
+plt.ylabel('$p$ (kPa)')
 plt.show()
 
 import json
