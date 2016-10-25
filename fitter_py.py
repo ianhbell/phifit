@@ -45,26 +45,20 @@ def get_data():
     print ('# data points:', len(all_JSON_data['data']))
     return all_JSON_data
 
-cfc = MCF.CoeffFitClass(json.dumps(get_data()))
-
-Nterms = 7
+Nterms = 14
 Npoly = Nterms
 departure0 = departure0.copy()
 
 departure0['departure[ij]']['n'] = [0]*Nterms
-departure0['departure[ij]']['d'] = [0]*Nterms
 departure0['departure[ij]']['t'] = [0]*Nterms
+departure0['departure[ij]']['d'] = [0]*Nterms
 departure0['departure[ij]']['ctau'] = [[0]]*Nterms
 departure0['departure[ij]']['ltau'] = [[0]]*Nterms
 departure0['departure[ij]']['cdelta'] = [[-1]]*Nterms
 departure0['departure[ij]']['ldelta'] = [[0]]*Nterms
 
-departure = departure0.copy()
-cfc.setup(json.dumps(departure))
-
-cfc.evaluate_serial([1,1,1,1])
-with open('baseline.json', 'w') as fp:
-    fp.write(json.dumps(json.loads(cfc.dump_outputs_to_JSON()), indent=2))
+cfc = MCF.CoeffFitClass(json.dumps(get_data()))
+cfc.setup(json.dumps(departure0.copy()))
 
 coeffs = MCF.Coefficients()
 
@@ -83,21 +77,23 @@ def chunks(l, n):
     n = max(1, n)
     return [l[i:i+n] for i in xrange(0, len(l), n)]
 
-def objective(x, departure, cfc, Nterms, Npoly, fit_delta = True, x0 = None, write_JSON = False):
+def objective(x, cfc, Nterms, fit_delta = True, x0 = None, write_JSON = False):
     if isinstance(x, np.ndarray):
         x = x.tolist()
-    Nexp_delta = 1
-    Nexp_tau = 1
-    betagamma,coeffs.n,coeffs.t,d, ldelta_els, cdelta_els = chunkify(x, [4, Nterms, Nterms, Nterms, Nexp_delta*Nterms, Nexp_delta*Nterms])
+    
     if fit_delta:
+        betagamma,coeffs.n,coeffs.t,d, ldelta_els, cdelta_els = chunkify(x, [4, Nterms, Nterms, Nterms, Nterms, Nterms])
         coeffs.d = d
-        coeffs.ldelta = chunks(ldelta_els,1)
         coeffs.cdelta = chunks(cdelta_els,1)
+        coeffs.ldelta = chunks(ldelta_els,1)
     else:
-        junk, d0, ldelta_els0, cdelta_els0 = chunkify(x0, [4 + 2*Nterms, Nterms, Nexp_delta*Nterms, Nexp_delta*Nterms])
-        coeffs.d = d0
+        betagamma,coeffs.n,coeffs.t,d, ldelta_els, cdelta_els = chunkify(x, [4, Nterms, Nterms, Nterms, Nterms, Nterms])
+        _bg, _n, _t, coeffs.d, ldelta_els0, _cdelta = chunkify(x0, [4, Nterms, Nterms, Nterms, Nterms, Nterms])
+        # These guys d and ldelta need to stay as integers, so we don't let them get fit 
+        # because the fitter will make them be non-integer values
         coeffs.ldelta = chunks(ldelta_els0,1)
-        coeffs.cdelta = chunks(cdelta_els0,1)
+        coeffs.cdelta = chunks(cdelta_els,1)
+
     cfc.setup(coeffs)
 
     try:
@@ -109,7 +105,8 @@ def objective(x, departure, cfc, Nterms, Npoly, fit_delta = True, x0 = None, wri
                 fp.write(json.dumps(jj, indent = 2))
             print(err, 'GOOD')
         else:
-            print(err)
+            pass
+            #print(err)
         return err
     except BaseException as BE:
         print('XX', BE)
@@ -117,11 +114,11 @@ def objective(x, departure, cfc, Nterms, Npoly, fit_delta = True, x0 = None, wri
 
 start_time = time.clock()
 
-# Generate a set of inputs that can be passed to objective function
-x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d']
-x0 += [_[0] for _ in departure['departure[ij]']['ldelta'][0:Npoly]]
-for els in departure['departure[ij]']['cdelta'][Npoly::]:
-    x0 += els
+# # Generate a set of inputs that can be passed to objective function
+# x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d']
+# x0 += [_[0] for _ in departure['departure[ij]']['ldelta'][0:Npoly]]
+# for els in departure['departure[ij]']['cdelta'][Npoly::]:
+#     x0 += els
 
 # N = 20
 # tic = time.clock()
@@ -135,19 +132,20 @@ coeffs_bounds = [(0.1, 1.5)]*4
 n_bounds = [(-5, 5)]*Nterms
 t_bounds = [(0.25, 5)]*Nterms
 d_bounds = [(0, 5)]*Nterms
-ldelta_bounds = [(0,3)]*Npoly
-cdelta_bounds = [(-5,0)]*Npoly
+ldelta_bounds = [(0,3)]*Nterms
+cdelta_bounds = [(-5,0)]*Nterms
 bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds + cdelta_bounds
-args=(departure, cfc, Nterms, Npoly)
+args = (cfc, Nterms)
 
 generator_functions = [random.uniform]*(4 + 2*Nterms) + [random.randint]*(Nterms*2) + [random.uniform]*Nterms
 normalizing_functions = [lambda x: x]*(4 + 2*Nterms) + [lambda x: int(round(x))]*(Nterms*2) + [lambda x: x]*Nterms
+sigma = [0.1]*(4 + 2*Nterms) + [1]*(Nterms*2) + [0.1]*Nterms
 
 print('About to fit ', len(bounds), 'coefficients')
 
 # Minimize using deap (global optimization using evolutionary optimization)
-results = minimize_deap(objective, bounds, Nindividuals=400, Ngenerations=20, Nhof = 20, args=args, 
-                        generator_functions = generator_functions, normalizing_functions = normalizing_functions)
+results = minimize_deap(objective, bounds, Nindividuals=4000, Ngenerations=20, Nhof = 20, args=args, 
+                        generator_functions = generator_functions, normalizing_functions = normalizing_functions, sigma = sigma)
 print(time.clock()-start_time, 's for deap optimization')
 
 # Serialize the hall of fame
@@ -164,9 +162,10 @@ for iind, soln in enumerate(hof):
     # Then try to run Nelder-Mead minimization from each promising point in the hall of fame
     # Many options for algorithms here, but Nelder-Mead is well-regarded for its stability (though
     # perhaps not its speed)
-    fit_delta = False # Do not fit d, ldelta, or cdelta in this phase
-    args=(departure, cfc, Nterms, Npoly, fit_delta, ind)
-    r = scipy.optimize.minimize(objective, ind, method='Nelder-Mead', args=args, options=dict(maxiter = 50, maxfev = 20))
+    # ----------------------
+    fit_delta = False # Do not fit d or ldelta in this phase
+    args = (cfc, Nterms, fit_delta, ind[:])
+    r = scipy.optimize.minimize(objective, ind[:], method='Nelder-Mead', args=args, options=dict(maxiter = 500, maxfev = 2000))
     print ('xfinal:', r.x)
     with open('soln{i:04d}.json'.format(i=iind), 'w') as fp:
         fp.write(json.dumps(json.loads(cfc.dump_outputs_to_JSON()), indent=2))
