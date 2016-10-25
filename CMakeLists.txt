@@ -51,9 +51,9 @@ elseif (PHIFIT_PYBIND11)
     # Build pybind11 python module
     # ----------------------------
     
-    add_subdirectory(externals/pybind11)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/externals/CoolProp/externals/pybind11")
     add_definitions(-DPYBIND11)
-    pybind11_add_module(MixtureCoefficientFitter ${APP_SOURCES})
+    pybind11_add_module(MixtureCoefficientFitter ${APP_SOURCES} "${CMAKE_SOURCE_DIR}/externals/CoolProp/src/pybind11_interface.cxx")
     target_link_libraries (MixtureCoefficientFitter PUBLIC CoolProp PUBLIC NISTfit)
 else()
     message(FATAL_ERROR "Must select a module: PHIFIT_MAIN, PHIFIT_TEST, PHIFIT_PYBIND11")
