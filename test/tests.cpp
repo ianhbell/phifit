@@ -1,5 +1,5 @@
 // Includes from Catch
-#include "externals/Catch/single_include/catch.hpp"
+#include "externals/CoolProp/externals/Catch/single_include/catch.hpp"
 
 // Includes from PhiFit
 #include "phifit/data_generation.h"
