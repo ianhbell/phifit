@@ -9,15 +9,13 @@ import time, json, random
 import sys
 sys.path.append('build/pybind11/Release')
 import MixtureCoefficientFitter as MCF
+from coeffs import ArrayDeconstructor
 
 # Other imports (conda installable packages)
 import numpy as np, matplotlib.pyplot as plt, pandas, scipy.optimize
 
 # Our deap optimization routine
 from deap_optimize import minimize_deap
-
-def random_dist(dims, minval, maxval):
-    return (maxval-minval)*np.random.random(dims) + minval
 
 #--------------------------------------
 #             Instantiation
@@ -42,58 +40,60 @@ def get_data():
     # Use the new EOS from Kehui and Eric
     all_JSON_data['about']['names'] = ['Ammonia(Hui)','Water']
 
-    print ('# data points:', len(all_JSON_data['data']))
+    print ('# "data" points (+ constraints):', len(all_JSON_data['data']))
     return all_JSON_data
 
-Nterms = 14
-Npoly = Nterms
-departure0 = departure0.copy()
+Nterms = 3 # Total number of terms in the summation of terms
+Npoly = 1 # Number of "polynomial" terms of the form n_i*tau^t_u*delta^d_i*exp(-cdelta_i*delta^ldelta_i-ctau_i*tau^ltau_i)
+Nexp_terms = 3 # Number of terms in each of the inner summations over j for i-th term
+Nexp = Nterms - Npoly # Number of "exponential" terms with the full polynomial term in the exponential
+Nu = (Nexp*Nexp_terms + Npoly) # Number of total terms associated with one of the things in the exp(u) function
 
-departure0['departure[ij]']['n'] = [0]*Nterms
-departure0['departure[ij]']['t'] = [0]*Nterms
-departure0['departure[ij]']['d'] = [0]*Nterms
-departure0['departure[ij]']['ctau'] = [[0]]*Nterms
-departure0['departure[ij]']['ltau'] = [[0]]*Nterms
-departure0['departure[ij]']['cdelta'] = [[-1]]*Nterms
-departure0['departure[ij]']['ldelta'] = [[0]]*Nterms
+# Bounds for the random generation for each family of parameter
+coeffs_bounds = [(0.1, 1.5)]*4
+n_bounds = [(-5, 5)]*Nterms
+t_bounds = [(0.25, 20)]*Nterms
+d_bounds = [(1, 5)]*Nterms
+ldelta_bounds = [(1,5)]*Nu
+cdelta_bounds = [(-5,0)]*Nu
+ltau_bounds = [(1,5)]*Nu
+ctau_bounds = [(-5,0)]*Nu
+bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds + cdelta_bounds + ltau_bounds + ctau_bounds
 
+# Definition of how the array of coefficients should be partitioned into chunks 
+# for each variable.  Each entry in the xdims list defines how many 
+xu = [1]*Npoly + [Nexp_terms]*Nexp # The term consumption definition for one of the things in the exp(u) function
+xdims = [4, Nterms, Nterms, Nterms, xu, xu, xu, xu]
+
+generator_functions = [random.uniform]*(4 + 2*Nterms) + [random.randint]*(Nterms + Nu) + [random.uniform]*Nu*3
+normalizing_functions = [lambda x: x]*(4 + 2*Nterms) + [lambda x: min(max(int(round(x)), 1), 5) ]*(Nterms + Nu) + [lambda x: x]*Nu*3
+sigma = [0.01]*(4 + 2*Nterms) + [1]*(Nterms + Nu) + [0.01]*Nu*3
+
+assert(len(bounds) == len(generator_functions))
+assert(len(bounds) == len(normalizing_functions))
+assert(len(bounds) == len(sigma))
+
+# Instantiate the fitter class with the experimental data stored in JSON format
 cfc = MCF.CoeffFitClass(json.dumps(get_data()))
 cfc.setup(json.dumps(departure0.copy()))
 
+# Instantiate the struct holding coefficients for the departure function
 coeffs = MCF.Coefficients()
-
-def chunkify(l, lengths):
-    ranges = []
-    istart = 0
-    for length in lengths:
-        ranges.append((istart, istart+length))
-        istart += length
-    if ranges[-1][1] != len(l):
-        raise AssertionError('length of list [{0:d}] not equal to last range el [{1:d}'.format(len(l), ranges[-1][1]))
-
-    return [l[range_[0]:range_[1]] for range_ in ranges]
-
-def chunks(l, n):
-    n = max(1, n)
-    return [l[i:i+n] for i in xrange(0, len(l), n)]
 
 def objective(x, cfc, Nterms, fit_delta = True, x0 = None, write_JSON = False):
     if isinstance(x, np.ndarray):
         x = x.tolist()
     
-    if fit_delta:
-        betagamma,coeffs.n,coeffs.t,d, ldelta_els, cdelta_els = chunkify(x, [4, Nterms, Nterms, Nterms, Nterms, Nterms])
-        coeffs.d = d
-        coeffs.cdelta = chunks(cdelta_els,1)
-        coeffs.ldelta = chunks(ldelta_els,1)
-    else:
-        betagamma,coeffs.n,coeffs.t,d, ldelta_els, cdelta_els = chunkify(x, [4, Nterms, Nterms, Nterms, Nterms, Nterms])
-        _bg, _n, _t, coeffs.d, ldelta_els0, _cdelta = chunkify(x0, [4, Nterms, Nterms, Nterms, Nterms, Nterms])
-        # These guys d and ldelta need to stay as integers, so we don't let them get fit 
-        # because the fitter will make them be non-integer values
-        coeffs.ldelta = chunks(ldelta_els0,1)
-        coeffs.cdelta = chunks(cdelta_els,1)
+    # Deconstruct the array into the data structures passed to the C++ class
+    betagamma, coeffs.n, coeffs.t, coeffs.d, coeffs.ldelta, coeffs.cdelta, coeffs.ltau, coeffs.ctau = ArrayDeconstructor(xdims, x)
 
+    if not fit_delta:
+        # The variables d and ldelta need to stay as integers, so we don't let them be modified
+        # because the fitter will make them be non-integer values, so we over-write
+        # them with the values obtained from the initial values for d and ldelta
+        _bg, _n, _t, coeffs.d, coeffs.ldelta, _cdelta, _ltau_els, _ctau_els = ArrayDeconstructor(xdims, x0)
+
+    # Pass the coefficients into the C++ class, set up the departure function
     cfc.setup(coeffs)
 
     try:
@@ -112,40 +112,33 @@ def objective(x, cfc, Nterms, fit_delta = True, x0 = None, write_JSON = False):
         print('XX', BE)
         return 1e10
 
-start_time = time.clock()
-
+# Speed testing code (uncomment to run)
+# ------------------
+# N = 20 # This many runs will be made
 # # Generate a set of inputs that can be passed to objective function
-# x0 = [0.911640, 0.9111660, 1.0541730, 1.3223907] + departure['departure[ij]']['n'] + departure['departure[ij]']['t'] + departure['departure[ij]']['d']
-# x0 += [_[0] for _ in departure['departure[ij]']['ldelta'][0:Npoly]]
-# for els in departure['departure[ij]']['cdelta'][Npoly::]:
-#     x0 += els
-
-# N = 20
+# x0 = [fcn(b[0], b[1]) for fcn, b in zip(generator_functions, bounds)]
 # tic = time.clock()
 # for i in range(N):
-#     objective(x0, departure, cfc, Nterms, Npoly)
+#     objective(x0, cfc, Nterms, Npoly)
 # toc = time.clock()
 # print((toc-tic)/N, 's/eval')
-# sys.exit(-1)
-    
-coeffs_bounds = [(0.1, 1.5)]*4
-n_bounds = [(-5, 5)]*Nterms
-t_bounds = [(0.25, 5)]*Nterms
-d_bounds = [(0, 5)]*Nterms
-ldelta_bounds = [(0,3)]*Nterms
-cdelta_bounds = [(-5,0)]*Nterms
-bounds = coeffs_bounds + n_bounds + t_bounds + d_bounds + ldelta_bounds + cdelta_bounds
-args = (cfc, Nterms)
+# sys.exit(-1) # EXIT
 
-generator_functions = [random.uniform]*(4 + 2*Nterms) + [random.randint]*(Nterms*2) + [random.uniform]*Nterms
-normalizing_functions = [lambda x: x]*(4 + 2*Nterms) + [lambda x: int(round(x))]*(Nterms*2) + [lambda x: x]*Nterms
-sigma = [0.1]*(4 + 2*Nterms) + [1]*(Nterms*2) + [0.1]*Nterms
+# *****************
+# *****************
+# DEAP OPTIMIZATION
+# *****************
+# *****************
 
-print('About to fit ', len(bounds), 'coefficients')
+start_time = time.clock()
+
+print('About to fit', len(bounds), 'coefficients')
 
 # Minimize using deap (global optimization using evolutionary optimization)
-results = minimize_deap(objective, bounds, Nindividuals=4000, Ngenerations=20, Nhof = 20, args=args, 
-                        generator_functions = generator_functions, normalizing_functions = normalizing_functions, sigma = sigma)
+results = minimize_deap(objective, bounds, Nindividuals=140000, Ngenerations=20, Nhof = 50, args=(cfc, Nterms), 
+                        generator_functions=generator_functions, normalizing_functions=normalizing_functions, sigma=sigma)
+
+# Print elapsed time for this first global optimization
 print(time.clock()-start_time, 's for deap optimization')
 
 # Serialize the hall of fame
@@ -155,18 +148,30 @@ with open('hof.json', 'w') as fp:
 # Load the HOF back in from file (this serves as rough serialization)
 hof = json.load(open('hof.json','r'))
 
+# ****************
+# ****************
+# REFINE SOLUTIONS
+# ****************
+# ****************
+
 # Refine the solutions for each individual
 for iind, soln in enumerate(hof):
+
     # Get the individual (the coefficients)
     ind = soln[u'c']
+    
     # Then try to run Nelder-Mead minimization from each promising point in the hall of fame
     # Many options for algorithms here, but Nelder-Mead is well-regarded for its stability (though
     # perhaps not its speed)
     # ----------------------
     fit_delta = False # Do not fit d or ldelta in this phase
     args = (cfc, Nterms, fit_delta, ind[:])
-    r = scipy.optimize.minimize(objective, ind[:], method='Nelder-Mead', args=args, options=dict(maxiter = 500, maxfev = 2000))
+    r = scipy.optimize.minimize(objective, ind[:], method='Nelder-Mead', args=args, options=dict(maxiter = 5000, maxfev = 20000))
     print ('xfinal:', r.x)
+    
+    # Write out each solution to file in JSON format
     with open('soln{i:04d}.json'.format(i=iind), 'w') as fp:
         fp.write(json.dumps(json.loads(cfc.dump_outputs_to_JSON()), indent=2))
+
+# Print out total elapsed time
 print(time.clock()-start_time, 's in total')

@@ -685,6 +685,10 @@ std::string CoeffFitClass::dump_outputs_to_JSON() {
     MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
     return mixeval->dump_outputs_to_JSON();
 }
+std::string CoeffFitClass::departure_function_to_JSON(){
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get());
+    return mixeval->departure_function_to_JSON();
+}
 
 /// The function that actually does the fitting - a thin wrapper around the CoeffFitClass
 double simplefit(const std::string &JSON_data_string, const std::string &JSON_fit0_string, bool threading, short Nthreads, std::vector<double> &c0, std::vector<double> &cfinal)
@@ -755,7 +759,8 @@ PYBIND11_PLUGIN(MixtureCoefficientFitter) {
         .def("errorvec", &CoeffFitClass::errorvec)
         .def("dump_outputs_to_JSON", &CoeffFitClass::dump_outputs_to_JSON)
         .def("sum_of_squares", &CoeffFitClass::sum_of_squares)
-        .def("elapsed_sec", &CoeffFitClass::elapsed_sec);
+        .def("elapsed_sec", &CoeffFitClass::elapsed_sec)
+        .def("departure_function_to_JSON", &CoeffFitClass::departure_function_to_JSON);
     
     init_CoolProp(m);
 

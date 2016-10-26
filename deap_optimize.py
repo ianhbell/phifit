@@ -266,7 +266,8 @@ def minimize_deap(f, bounds, Nindividuals = 5000, Ngenerations = 20, Nhof = 50,
     
     hof = tools.HallOfFame(Nhof)
     stats = tools.Statistics(lambda ind: ind.fitness.values)
-    stats.register("min", np.min)
+    stats.register("min fitness", np.min)
+    stats.register("stddev fitness", np.std)
     
     pop = toolbox.population(n=Nindividuals)
     pop, log = myEaSimple(pop, 

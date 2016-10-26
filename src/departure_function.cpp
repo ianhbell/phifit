@@ -30,6 +30,11 @@ PhiFitDepartureFunction::PhiFitDepartureFunction(rapidjson::Value &JSON_data) {
     //if (max_cdelta > 0.0) { throw CoolProp::ValueError("All coefficients of cdelta with non-zero power MUST be non-positive"); }
     //if (max_ctau > 0.0) { throw CoolProp::ValueError("All coefficients of ctau with non-zero power MUST be non-positive"); }
 }
+void PhiFitDepartureFunction::update_coeffs(const Coefficients &coeffs){
+    this->n = coeffs.n; this->t = coeffs.t; this->d = coeffs.d;
+    this->ldelta = coeffs.ldelta; this->cdelta = coeffs.cdelta;
+    this->ltau = coeffs.ltau; this->ctau = coeffs.ctau;
+}
 
 rapidjson::Value PhiFitDepartureFunction::to_JSON(rapidjson::Document &doc) {
     rapidjson::Value val; val.SetObject();

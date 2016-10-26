@@ -41,7 +41,9 @@ public:
     /// Return the error vector from the evaluator
     std::vector<double> errorvec();
     /// Return all the outputs in JSON form, in a form similar to the input JSON structure, plus any additional metadata desired
-    std::string dump_outputs_to_JSON() ;
+    std::string dump_outputs_to_JSON();
+    /// Dump the departure function to JSON
+    std::string departure_function_to_JSON();
 };
 
 #endif

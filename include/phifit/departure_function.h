@@ -15,7 +15,7 @@ public:
     PhiFitDepartureFunction(rapidjson::Value &JSON_data) ;
     void update(double tau, double delta);
     rapidjson::Value to_JSON(rapidjson::Document &doc);
-    void update_coeffs(const Coefficients &coeffs){ this->n = coeffs.n; this->t = coeffs.t; this->d = coeffs.d; this->ldelta = coeffs.ldelta; this->cdelta = coeffs.cdelta; }
+    void update_coeffs(const Coefficients &coeffs);
 };
 
 #endif
