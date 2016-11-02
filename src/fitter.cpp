@@ -97,6 +97,7 @@ public:
 
     // Do the calculation
     void evaluate_one() {
+        m_y_calc = 1e80;
         const std::vector<double> &c = m_evaluator->get_const_coefficients();
         // Resize the row in the Jacobian matrix if needed
         std::size_t N = c.size();
@@ -134,15 +135,10 @@ public:
         PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
         CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
         
-        CoolProp::GERG2008ReducingFunction *GERGL = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->SatL->Reducing.get());
-        GERGL->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
-        CoolProp::GERG2008ReducingFunction *GERGV = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->SatV->Reducing.get());
-        GERGV->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
-
-        // Calculate the chemical potentials for liquid and vapor
+        // Calculate the chemical potentials for liquid and vapor phases
         std::size_t i = 0;
-        double muL = mu_over_RT(HEOS->SatL.get(), in->x(), i);
-        double muV = mu_over_RT(HEOS->SatV.get(), in->y(), i);
+        double muL = mu_over_RT(HEOS->SatL.get(), c, in->x(), i);
+        double muV = mu_over_RT(HEOS->SatV.get(), c, in->y(), i);
         
         // Update the densities if requested
         if (update_densities) { 
@@ -151,17 +147,25 @@ public:
         }
         return muV - muL;
     }
-    double mu_over_RT(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i) {
-        // Cast abstract input to the derived type so we can access its attributes
-        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+    double mu_over_RT(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &c, const std::vector<double> &z, std::size_t i) {
+        
+        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
+        
+        try{
+        
+            // Cast abstract input to the derived type so we can access its attributes
+            PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
 
-        HEOS->set_mole_fractions(z);
-        if (in->rhoV() < 0) {
-            HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
+            HEOS->set_mole_fractions(z);
+            if (in->rhoV() < 0) {
+                HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
+            }
+            else {
+                HEOS->update_TP_guessrho(in->T(), in->p(), in->rhoV());
+            }
         }
-        else {
-            HEOS->update_TP_guessrho(in->T(), in->p(), in->rhoV());
-        }
+        catch(...){ return 10000; }
 
         return HEOS->chemical_potential(i)/(HEOS->gas_constant()*HEOS->T());
     }
@@ -355,6 +359,7 @@ public:
 
     // Do the calculation
     void evaluate_one() {
+        m_y_calc = 1e80;
         try{
             const std::vector<double> &c = m_evaluator->get_const_coefficients();
             // Resize the row in the Jacobian matrix if needed
