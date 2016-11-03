@@ -160,7 +160,7 @@ def myEaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
     record = stats.compile(population) if stats else {}
     logbook.record(gen=0, nevals=len(invalid_ind), **record)
     # Add the elapsed time for the generation to the record dictionary
-    record['elapsed'] = time.clock() - start_time
+    record['elapsed (s)'] = time.clock() - start_time
     if verbose:
         print logbook.stream
 
@@ -192,7 +192,7 @@ def myEaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
         # Append the current generation statistics to the logbook
         record = stats.compile(population) if stats else {}
         # Add the elapsed time for the generation to the record dictionary
-        record['elapsed'] = time.clock() - start_time
+        record['elapsed (s)'] = time.clock() - start_time
         # Store the statistics in the logbook
         logbook.record(gen=gen, nevals=len(invalid_ind), **record)
         if verbose:
@@ -266,8 +266,8 @@ def minimize_deap(f, bounds, Nindividuals = 5000, Ngenerations = 20, Nhof = 50,
     
     hof = tools.HallOfFame(Nhof)
     stats = tools.Statistics(lambda ind: ind.fitness.values)
-    stats.register("min fitness", np.min)
-    stats.register("stddev fitness", np.std)
+    stats.register("min(fitness)", np.min)
+    stats.register("stddev(fitness)", np.std)
     
     pop = toolbox.population(n=Nindividuals)
     pop, log = myEaSimple(pop, 
