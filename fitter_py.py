@@ -114,16 +114,17 @@ def objective(x, cfc, Nterms, fit_delta = True, x0 = None, write_JSON = False):
         print('XX', BE)
         return 1e10
 
-# Speed testing code (uncomment to run)
-# ------------------
+# # Speed testing code (uncomment to run)
+# # ------------------
+# random.seed(0) # Always have the same "random" values since the seed is set
 # N = 20 # This many runs will be made
 # # Generate a set of inputs that can be passed to objective function
 # x0 = [fcn(b[0], b[1]) for fcn, b in zip(generator_functions, bounds)]
 # tic = time.clock()
 # for i in range(N):
-#     objective(x0, cfc, Nterms, Npoly)
+#     objective(x0, cfc, Nterms, False, x0=x0)
 # toc = time.clock()
-# print((toc-tic)/N, 's/eval')
+# print((toc-tic)/N, 's/ind;', (toc-tic)/N/len(get_data()['data'])*1e6, 'us/row')
 # sys.exit(-1) # EXIT
 
 # *****************
