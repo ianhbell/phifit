@@ -774,6 +774,9 @@ PYBIND11_PLUGIN(MixtureCoefficientFitter) {
         .def("departure_function_to_JSON", &CoeffFitClass::departure_function_to_JSON);
     
     init_CoolProp(m);
+    m.def("set_departure_function", &set_departure_function);
+    m.def("update_departure_function", &update_departure_function);
+    m.def("factory", [](const std::string &backend, const std::string &fluids) { return CoolProp::AbstractState::factory(backend, fluids); });
 
     return m.ptr();
 }
