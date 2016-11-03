@@ -35,6 +35,8 @@ def get_data():
     all_JSON_data['data'] += Smolen_data['data']
     all_JSON_data['data'] += Harms_data['data']
 
+    random.shuffle(all_JSON_data['data'])
+
     #all_JSON_data['data'] = all_JSON_data['data'][0::4] # every fourth data point
 
     # Use the new EOS from Kehui and Eric
