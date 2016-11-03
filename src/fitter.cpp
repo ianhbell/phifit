@@ -98,35 +98,38 @@ public:
     // Do the calculation
     void evaluate_one() {
         m_y_calc = 1e80;
-        const std::vector<double> &c = m_evaluator->get_const_coefficients();
-        // Resize the row in the Jacobian matrix if needed
-        std::size_t N = c.size();
-        if (Jacobian_row.size() != N) {
-            resize(N);
+        try{
+            const std::vector<double> &c = m_evaluator->get_const_coefficients();
+            // Resize the row in the Jacobian matrix if needed
+            std::size_t N = c.size();
+            if (Jacobian_row.size() != N) {
+                resize(N);
+            }
+            if (JtempL.size() != N){ JtempL.resize(N); }
+            if (JtempV.size() != N) { JtempV.resize(N); }
+
+            // Evaluate the residual at given coefficients
+            m_y_calc = evaluate(c, false); 
+
+            // Cast abstract input to the derived type so we can access its attributes
+            PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+
+            std::size_t i = 0;
+            evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
+            evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
+            evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
+            evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
+            
+            for (std::size_t i = 0; i < c.size(); ++i) {
+                // Numerical derivatives for checking purposes
+                // ------------
+                //Jacobian_row[i] = der_num(i, 0.00001);
+
+                Jacobian_row[i] = JtempV[i] - JtempL[i];
+            }
         }
-        if (JtempL.size() != N){ JtempL.resize(N); }
-        if (JtempV.size() != N) { JtempV.resize(N); }
-
-        // Evaluate the residual at given coefficients
-        m_y_calc = evaluate(c, false); 
-
-        // Cast abstract input to the derived type so we can access its attributes
-        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
-        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-
-        std::size_t i = 0;
-        evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
-        evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
-        evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
-        evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
-        
-        for (std::size_t i = 0; i < c.size(); ++i) {
-            // Numerical derivatives for checking purposes
-            // ------------
-            //Jacobian_row[i] = der_num(i, 0.00001);
-
-            Jacobian_row[i] = JtempV[i] - JtempL[i];
-        }
+        catch(...){ m_y_calc = 10000; }
 
     }
     double evaluate(const std::vector<double> &c, bool update_densities = false) {
@@ -152,20 +155,17 @@ public:
         CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
         GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
         
-        try{
-        
-            // Cast abstract input to the derived type so we can access its attributes
-            PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
+        // Cast abstract input to the derived type so we can access its attributes
+        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
 
-            HEOS->set_mole_fractions(z);
-            if (in->rhoV() < 0) {
-                HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
-            }
-            else {
-                HEOS->update_TP_guessrho(in->T(), in->p(), in->rhoV());
-            }
+        HEOS->set_mole_fractions(z);
+        if (in->rhoV() < 0) {
+            HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
         }
-        catch(...){ return 10000; }
+        else {
+            HEOS->update_TP_guessrho(in->T(), in->p(), in->rhoV());
+        }
+        
 
         return HEOS->chemical_potential(i)/(HEOS->gas_constant()*HEOS->T());
     }
@@ -373,8 +373,9 @@ public:
             analyt_derivs(Jacobian_row);
         }
         catch (...) {
-            m_y_calc = evaluate(m_evaluator->get_const_coefficients(), false);
-            throw;
+            m_y_calc = 10000;
+//            m_y_calc = evaluate(m_evaluator->get_const_coefficients(), false);
+//            throw;
         }
 
         //// Numerical derivatives for testing purposes if necessary
