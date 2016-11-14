@@ -3,3 +3,4 @@
 /*.json
 /deap_optimize.pyc
 *.pyc
+data/ammonia-water/*.json
