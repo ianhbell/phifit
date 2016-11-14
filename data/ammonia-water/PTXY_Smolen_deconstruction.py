@@ -43,6 +43,9 @@ Smolen_data = {
 }
 }
 
+import CoolProp, CoolProp.CoolProp as CP
+CP.set_config_string(CoolProp.ALTERNATIVE_REFPROP_PATH, '/opt/refprop/')
+
 import quantities as pq, json
 data = []
 for T in [293.15, 323.15, 353.15, 383.15, 413.15]:
@@ -50,6 +53,12 @@ for T in [293.15, 323.15, 353.15, 383.15, 413.15]:
     y_H2O = Smolen_data[T]['y_H2O']
     p_Pa = pq.Quantity(Smolen_data[T]['p_psia'],pq.psi).rescale(pq.Pa)
     for i in range(len(p_Pa)):
+        AS = CP.AbstractState('REFPROP','AMMONIAL&WATER')
+        AS.set_mole_fractions([1-y_H2O[i], y_H2O[i]])
+        AS.update(CP.PQ_INPUTS, p_Pa[i], 0)
+        rhoL = AS.saturated_liquid_keyed_output(CP.iDmolar)
+        rhoV = AS.saturated_vapor_keyed_output(CP.iDmolar)
+
         pt = {'p (Pa)': float(p_Pa[i]),
               'T (K)': T,
               'x (molar)': [1-x_H2O[i], x_H2O[i]],
