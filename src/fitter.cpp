@@ -88,9 +88,10 @@ protected:
     AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
     std::vector<double> JtempL, ///< A temporary buffer for holding the liquid evaluation of derivatives w.r.t. coefficients
                         JtempV; ///< A temporary buffer for holding the vapor evaluation of derivatives w.r.t. coefficients
+    double previous_error;
 public:
     PTXYOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : PhiFitOutput(in), m_evaluator(eval) { };
+        : PhiFitOutput(in), m_evaluator(eval), previous_error(1e90) { };
 
     /// Return the error
     double get_error() { return m_y_calc; };
@@ -98,6 +99,7 @@ public:
     // Do the calculation
     void evaluate_one() {
         m_y_calc = 1e80;
+        const bool update_densities = true;
         try{
             const std::vector<double> &c = m_evaluator->get_const_coefficients();
             // Resize the row in the Jacobian matrix if needed
@@ -109,7 +111,7 @@ public:
             if (JtempV.size() != N) { JtempV.resize(N); }
 
             // Evaluate the residual at given coefficients
-            m_y_calc = evaluate(c, false); 
+            m_y_calc = evaluate(c);
 
             // Cast abstract input to the derived type so we can access its attributes
             PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
@@ -128,11 +130,21 @@ public:
 
                 Jacobian_row[i] = JtempV[i] - JtempL[i];
             }
+            
+            // Update the densities if requested and the error is less than the previous value
+            // that resulted in the densities being cached
+            if (update_densities && std::abs(m_y_calc) < std::abs(previous_error)) {
+                in->set_rhoV(HEOS->SatV->rhomolar());
+                in->set_rhoL(HEOS->SatL->rhomolar());
+                previous_error = m_y_calc;
+            }
         }
-        catch(...){ m_y_calc = 10000; }
+        catch(...){
+            m_y_calc = 10000;
+        }
 
     }
-    double evaluate(const std::vector<double> &c, bool update_densities = false) {
+    double evaluate(const std::vector<double> &c) {
         
         // Cast abstract input to the derived type so we can access its attributes
         PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
@@ -140,17 +152,12 @@ public:
         
         // Calculate the chemical potentials for liquid and vapor phases
         std::size_t i = 0;
-        double muL = mu_over_RT(HEOS->SatL.get(), c, in->x(), i);
-        double muV = mu_over_RT(HEOS->SatV.get(), c, in->y(), i);
+        double muL = mu_over_RT(HEOS->SatL.get(), c, in->x(), i, in->rhoL());
+        double muV = mu_over_RT(HEOS->SatV.get(), c, in->y(), i, in->rhoV());
         
-        // Update the densities if requested
-        if (update_densities) { 
-            in->set_rhoV(HEOS->SatV->rhomolar());
-            in->set_rhoL(HEOS->SatL->rhomolar());
-        }
         return muV - muL;
     }
-    double mu_over_RT(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &c, const std::vector<double> &z, std::size_t i) {
+    double mu_over_RT(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &c, const std::vector<double> &z, std::size_t i, double rhomolar_guess = -1) {
         
         CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
         GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
@@ -159,13 +166,12 @@ public:
         PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
 
         HEOS->set_mole_fractions(z);
-        if (in->rhoV() < 0) {
+        if (rhomolar_guess < 0) {
             HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
         }
         else {
-            HEOS->update_TP_guessrho(in->T(), in->p(), in->rhoV());
+            HEOS->update_TP_guessrho(in->T(), in->p(), rhomolar_guess);
         }
-        
 
         return HEOS->chemical_potential(i)/(HEOS->gas_constant()*HEOS->T());
     }
@@ -359,7 +365,6 @@ public:
 
     // Do the calculation
     void evaluate_one() {
-        m_y_calc = 1e80;
         try{
             const std::vector<double> &c = m_evaluator->get_const_coefficients();
             // Resize the row in the Jacobian matrix if needed
