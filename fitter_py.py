@@ -43,8 +43,8 @@ def get_data():
     return all_JSON_data
 
 Nterms = 6 # Total number of terms in the summation of terms
-Npoly = 4 # Number of "polynomial" terms of the form n_i*tau^t_u*delta^d_i*exp(-cdelta_i*delta^ldelta_i-ctau_i*tau^ltau_i)
-Nexp_terms = 3 # Number of terms in each of the inner summations over j for i-th term
+Npoly = 6 # Number of "polynomial" terms of the form n_i*tau^t_u*delta^d_i*exp(-cdelta_i*delta^ldelta_i-ctau_i*tau^ltau_i)
+Nexp_terms = 5 # Number of terms in each of the inner summations over j for i-th term
 Nexp = Nterms - Npoly # Number of "exponential" terms with the full polynomial term in the exponential
 Nu = (Nexp*Nexp_terms + Npoly) # Number of total terms associated with one of the things in the exp(u) function
 
@@ -89,13 +89,18 @@ jj = json.loads(cfc.dump_outputs_to_JSON())
 with open('baseline.json', 'w') as fp:
     fp.write(json.dumps(jj, indent = 2))
 print('baseline:', cfc.sum_of_squares()**0.5)
-#sys.exit()
+cfc.run(True, 4, [0.911640, 0.9111660, 1.0541730, 1.3223907])
+jj = json.loads(cfc.dump_outputs_to_JSON())
+with open('w_fitting_betasgammas.json', 'w') as fp:
+    fp.write(json.dumps(jj, indent = 2))
+print('w/ fitting betas, gammas:', cfc.sum_of_squares()**0.5)
+
 
 def objective(x, cfc, Nterms, fit_delta = True, x0 = None, write_JSON = False):
     if isinstance(x, np.ndarray):
         x = x.tolist()
     # Instantiate the struct holding coefficients for the departure function
-    coeffs = MCF.Coefficients()  
+    coeffs = MCF.Coefficients()
     
     # Deconstruct the array into the data structures passed to the C++ class
     betagamma, coeffs.n, coeffs.t, coeffs.d, coeffs.ldelta, coeffs.cdelta, coeffs.ltau, coeffs.ctau = ArrayDeconstructor(xdims, x)
@@ -152,7 +157,7 @@ start_time = time.clock()
 print('About to fit', len(bounds), 'coefficients')
 
 # Minimize using deap (global optimization using evolutionary optimization)
-results = minimize_deap(objective, bounds, Nindividuals= 25*len(bounds), Ngenerations=40, Nhof = 50, args=(cfc, Nterms), 
+results = minimize_deap(objective, bounds, Nindividuals= 250*len(bounds), Ngenerations=40, Nhof = 50, args=(cfc, Nterms), 
                         generator_functions=generator_functions, normalizing_functions=normalizing_functions, sigma=sigma)
 
 # Print elapsed time for this first global optimization

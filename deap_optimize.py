@@ -143,7 +143,7 @@ def myEaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
     Originally from DEAP v. 1.1.0, modified by Ian Bell, NIST
     """
     logbook = tools.Logbook()
-    logbook.header = ['gen', 'nevals', 'elapsed'] + (stats.fields if stats else [])
+    logbook.header = ['gen', 'nevals', 'elapsed (s)'] + (stats.fields if stats else [])
 
     # Start timing this generation
     start_time = time.clock()
