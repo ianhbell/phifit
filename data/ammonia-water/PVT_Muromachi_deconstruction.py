@@ -43,7 +43,8 @@ for T_K, group in six.iteritems(data):
               'rho (mol/m3)': rho_kgm3/molemass_kgmol,
               'T (K)': float(T_K),
               'z (molar)': [xNH3, 1-xNH3],
-              'type': "PRhoT"
+              'type': "PRhoT",
+              'BibTeX': "Muromachi-JCT-2008-1594"
             }
             pts.append(pt)
         plt.plot(1/np.array(RHO), group['p (MPa)'], label=str(T_K) +  ' - ' + str(xNH3))

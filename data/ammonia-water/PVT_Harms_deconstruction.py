@@ -567,7 +567,8 @@ for segment in [B11,B12,B13,B14]:
                       'rho (mol/m3)': float(pieces[i+1])/molemass,
                       'T (K)': T,
                       'z (molar)': [xNH3, 1-xNH3],
-                      'type': "PRhoT"
+                      'type': "PRhoT",
+                      'BibTeX': 'HarmsWartzenberg-VDI-1995'
                       }
                 data.append(pt)
         rho_kgm3,rho_moldm3,p_kPa = zip(*sorted(zip(rho_kgm3,rho_moldm3, p_kPa)))
@@ -594,7 +595,8 @@ for chunk in B2.replace(',','.').split('\n@@\n'):
                   'rho (mol/m3)': 1/v_dm3mol[-1]*1000.0,
                   'T (K)': T,
                   'z (molar)': [xNH3, 1-xNH3],
-                  'type': "PRhoT"
+                  'type': "PRhoT",
+                  'BibTeX': 'HarmsWartzenberg-VDI-1995'
                   }
             data.append(pt)
     v_dm3mol,p_kPa = zip(*sorted(zip(v_dm3mol, p_kPa)))
