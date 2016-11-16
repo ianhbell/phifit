@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Data to be passed into fitter",
+  "type": "object",
+  "required": [
+    "data",
+    "about"
+  ],
+  "properties": {
+    "about": {
+      "description": "Metadata describing this data",
+      "type": "object",
+      "properties": {
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "names"
+      ]
+    },
+    "data": {
+      "description": "The array of data",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "p (Pa)",
+              "rho (mol/m3)",
+              "T (K)",
+              "z (molar)",
+              "BibTeX"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "PRhoT"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "p (Pa)",
+              "T (K)",
+              "x (molar)",
+              "y (molar)",
+              "BibTeX"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "PTXY"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
