@@ -44,6 +44,10 @@ public:
     std::string dump_outputs_to_JSON();
     /// Dump the departure function to JSON
     std::string departure_function_to_JSON();
+    /// Set departure function by its name (or alias)
+    void set_departure_function_by_name(const std::string &name);
+    /// Set a binary interaction parameter
+    void set_binary_interaction_double(const std::size_t i, const std::size_t j, const std::string &param, double val);
 };
 
 #endif

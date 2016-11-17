@@ -99,7 +99,8 @@ public:
     // Do the calculation
     void evaluate_one() {
         m_y_calc = 1e80;
-        const bool update_densities = true;
+        const bool update_densities = false;
+        const double weight = 1;
         try{
             const std::vector<double> &c = m_evaluator->get_const_coefficients();
             // Resize the row in the Jacobian matrix if needed
@@ -111,7 +112,7 @@ public:
             if (JtempV.size() != N) { JtempV.resize(N); }
 
             // Evaluate the residual at given coefficients
-            m_y_calc = evaluate(c);
+            m_y_calc = weight*evaluate(c);
 
             // Cast abstract input to the derived type so we can access its attributes
             PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
@@ -128,7 +129,7 @@ public:
                 // ------------
                 //Jacobian_row[i] = der_num(i, 0.00001);
 
-                Jacobian_row[i] = JtempV[i] - JtempL[i];
+                Jacobian_row[i] = weight*(JtempV[i] - JtempL[i]);
             }
             
             // Update the densities if requested and the error is less than the previous value
@@ -167,9 +168,11 @@ public:
 
         HEOS->set_mole_fractions(z);
         if (rhomolar_guess < 0) {
+            // Global PT flash (expensive!)
             HEOS->update(CoolProp::PT_INPUTS, in->p(), in->T());
         }
         else {
+            // Local PT flash, starting from given density
             HEOS->update_TP_guessrho(in->T(), in->p(), rhomolar_guess);
         }
 
@@ -512,7 +515,7 @@ public:
             calc_PT.AddMember("rhomolar (mol/m3)", HEOS->rhomolar(), doc.GetAllocator()); 
         }
         catch (std::exception &e) {
-            std::cout << e.what() << std::endl;
+            //std::cout << e.what() << std::endl;
             calc_PT.AddMember("rhomolar (mol/m3)", -1, doc.GetAllocator());
         }
         val.AddMember("calc_PT", calc_PT, doc.GetAllocator());
@@ -604,6 +607,28 @@ public:
             }
         }
     }
+    void set_departure_function_by_name(const std::string& name){
+        for (auto &out : m_outputs) {
+            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
+            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            
+            for (std::size_t i = 0; i <= 1; ++i) {
+                std::size_t j = 1 - i;
+                HEOS->set_binary_interaction_double(i, j, "Fij", 1.0); // Turn on departure term
+                HEOS->set_binary_interaction_string(i, j, "function", name);
+            }
+        }
+    }
+    void set_binary_interaction_double(const std::size_t i, const std::size_t j, const std::string &param, double val){
+        for (auto &out : m_outputs) {
+            NumericOutput *_out = static_cast<NumericOutput *>(out.get());
+            PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
+            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+            HEOS->set_binary_interaction_double(i, j, param, val);
+
+        }
+    }
     std::string departure_function_to_JSON() {
         for (auto &out : m_outputs) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
@@ -654,6 +679,17 @@ void CoeffFitClass::setup(const Coefficients &coeffs){
     MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
     mixeval->update_departure_function(coeffs);
 }
+void CoeffFitClass::set_departure_function_by_name(const std::string &name){
+    // Inject the desired departure function
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+    mixeval->set_departure_function_by_name(name);
+}
+void CoeffFitClass::set_binary_interaction_double(const std::size_t i, const std::size_t j, const std::string &param, double val){
+    // Inject the desired departure function
+    MixtureEvaluator* mixeval = static_cast<MixtureEvaluator*>(m_eval.get()); // Type-cast
+    mixeval->set_binary_interaction_double(i,j,param,val);
+}
+
 void CoeffFitClass::setup(const std::string &JSON_fit0_string)
 {
     // Make sure string is not empty
@@ -718,6 +754,7 @@ double simplefit(const std::string &JSON_data_string, const std::string &JSON_fi
 #include <pybind11/stl.h>
 namespace py = pybind11;
 
+
 void set_departure_function(CoolProp::AbstractState * AS, std::string &departure_JSON_string){
     rapidjson::Document doc; doc.SetObject();
     cpjson::JSON_string_to_rapidjson(departure_JSON_string, doc);
@@ -771,7 +808,10 @@ PYBIND11_PLUGIN(MixtureCoefficientFitter) {
         .def("dump_outputs_to_JSON", &CoeffFitClass::dump_outputs_to_JSON)
         .def("sum_of_squares", &CoeffFitClass::sum_of_squares)
         .def("elapsed_sec", &CoeffFitClass::elapsed_sec)
-        .def("departure_function_to_JSON", &CoeffFitClass::departure_function_to_JSON);
+        .def("departure_function_to_JSON", &CoeffFitClass::departure_function_to_JSON)
+        .def("set_departure_function_by_name", &CoeffFitClass::set_departure_function_by_name)
+        .def("set_binary_interaction_double", &CoeffFitClass::set_binary_interaction_double)
+        ;
     
     init_CoolProp(m);
     m.def("set_departure_function", &set_departure_function);
