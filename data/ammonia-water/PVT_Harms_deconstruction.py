@@ -568,7 +568,7 @@ for segment in [B11,B12,B13,B14]:
                       'T (K)': T,
                       'z (molar)': [xNH3, 1-xNH3],
                       'type': "PRhoT",
-                      'BibTeX': 'HarmsWartzenberg-VDI-1995'
+                      'BibTeX': 'HarmsWatzenberg-VDI-1995'
                       }
                 data.append(pt)
         rho_kgm3,rho_moldm3,p_kPa = zip(*sorted(zip(rho_kgm3,rho_moldm3, p_kPa)))
@@ -596,7 +596,7 @@ for chunk in B2.replace(',','.').split('\n@@\n'):
                   'T (K)': T,
                   'z (molar)': [xNH3, 1-xNH3],
                   'type': "PRhoT",
-                  'BibTeX': 'HarmsWartzenberg-VDI-1995'
+                  'BibTeX': 'HarmsWatzenberg-VDI-1995'
                   }
             data.append(pt)
     v_dm3mol,p_kPa = zip(*sorted(zip(v_dm3mol, p_kPa)))

@@ -65,7 +65,8 @@ for T in [293.15, 323.15, 353.15, 383.15, 413.15]:
               'y (molar)': [1-y_H2O[i], y_H2O[i]],
               'rho\' (guess,mol/m3)': -1,
               'rho\'\' (guess,mol/m3)': -1,
-              'type': "PTXY"
+              'type': "PTXY",
+              'BibTeX': "Smolen-JCED-1991"
               }
         data.append(pt)
 

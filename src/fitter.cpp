@@ -33,10 +33,12 @@ using namespace NISTfit;
 class PhiFitInput : public NumericInput{    
 protected:
     shared_ptr<CoolProp::AbstractState> AS;
+    std::string BibTeX; /// The BibTeX key associated with this data point
 public:
     PhiFitInput(double x, double y): NumericInput(x, y) {};
     /// Return a reference to the AbstractState being modified
     shared_ptr<CoolProp::AbstractState> &get_AS() { return AS; }
+    std::string get_BibTeX(){ return BibTeX; }
 };
 
 /// This class holds common terms for outputs
@@ -61,9 +63,10 @@ public:
      @param AS AbstractState to be used for fitting
      @param T Temperature in K
      @param p Pressure in Pa
+     @param BibTeX The BibTeX key associated with this data point
      */
-    PTXYInput(shared_ptr<CoolProp::AbstractState> &AS, double T, double p, const std::vector<double>&x, const std::vector<double> &y, double rhoL, double rhoV)
-        : PhiFitInput(T, p), m_T(T), m_p(p), m_x(x), m_y(y), m_rhoL(rhoL), m_rhoV(rhoV)  { this->AS = AS; };
+    PTXYInput(shared_ptr<CoolProp::AbstractState> &AS, double T, double p, const std::vector<double>&x, const std::vector<double> &y, double rhoL, double rhoV, const std::string &BibTeX)
+        : PhiFitInput(T, p), m_T(T), m_p(p), m_x(x), m_y(y), m_rhoL(rhoL), m_rhoV(rhoV)  { this->AS = AS; this->BibTeX = BibTeX;};
     
     /// Get the temperature (K)
     double T(){ return m_T; }
@@ -291,6 +294,7 @@ public:
         std::vector<double> y = cpjson::get_double_array(v, "y (molar)");
         double rhoL = cpjson::get_double(v, "rho' (guess,mol/m3)"); // First guess
         double rhoV = cpjson::get_double(v, "rho'' (guess,mol/m3)"); // First guess
+        std::string BibTeX = cpjson::get_string(v, "BibTeX");
 
         // Sum up the mole fractions of the liquid and vapor phase - if not 1, it's not a PTxy point, perhaps PTx or PTy
         double sumx = std::accumulate(x.begin(), x.end(), 0.0);
@@ -301,7 +305,7 @@ public:
             // Generate the AbstractState instance owned by this data point
             std::shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory(backend, fluids));
             // Generate the input which stores the PTxy data that is to be fit
-            std::shared_ptr<NumericInput> in(new PTXYInput(AS, T, p, x, y, rhoL, rhoV));
+            std::shared_ptr<NumericInput> in(new PTXYInput(AS, T, p, x, y, rhoL, rhoV, BibTeX));
             // Generate and add the output value
             out.reset(new PTXYOutput(std::move(in), eval));
         }
@@ -321,6 +325,7 @@ public:
         val.AddMember("residue", m_y_calc, doc.GetAllocator());
         cpjson::set_double_array("x", in->x(), val, doc);
         cpjson::set_double_array("y", in->y(), val, doc);
+        cpjson::set_string("BibTeX", in->get_BibTeX().c_str(), val, doc);
 
         // Add it to the list
         list.PushBack(val, doc.GetAllocator());
@@ -343,9 +348,10 @@ public:
     @param rho Molar density in mol/m^3
     @param T Temperature in K
     @param z Molar composition vector
+    @param BibTeX The BibTeX key associated with this data point
     */
-    PRhoTInput(shared_ptr<CoolProp::AbstractState> &AS, double p, double rhomolar, double T, const std::vector<double>&z)
-        : PhiFitInput(T, p), m_p(p), m_rhomolar(rhomolar), m_T(T), m_z(z) {this->AS = AS;};
+    PRhoTInput(shared_ptr<CoolProp::AbstractState> &AS, double p, double rhomolar, double T, const std::vector<double>&z, std::string &BibTeX)
+        : PhiFitInput(T, p), m_p(p), m_rhomolar(rhomolar), m_T(T), m_z(z) {this->AS = AS; this->BibTeX = BibTeX;};
     /// Get the temperature (K)
     double T() { return m_T; }
     /// Get the molar density (mol/m^3)
@@ -478,11 +484,12 @@ public:
         double p = cpjson::get_double(v, "p (Pa)");
         double rhomolar = cpjson::get_double(v, "rho (mol/m3)");
         std::vector<double> z = cpjson::get_double_array(v, "z (molar)");
+        std::string BibTeX = cpjson::get_string(v, "BibTeX");
         
         // Generate the AbstractState instance owned by this data point
         std::shared_ptr<CoolProp::AbstractState> AS(CoolProp::AbstractState::factory(backend, fluids));
         // Generate the input which stores the PTxy data that is to be fit
-        std::shared_ptr<NumericInput> in(new PRhoTInput(AS, p, rhomolar, T, z));
+        std::shared_ptr<NumericInput> in(new PRhoTInput(AS, p, rhomolar, T, z, BibTeX));
         // Generate and add the output value
         out.reset(new PRhoTOutput(std::move(in), eval));
         return out;
@@ -501,6 +508,7 @@ public:
         val.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
         cpjson::set_double_array("z", in->z(), val, doc);
         val.AddMember("residue", m_y_calc, doc.GetAllocator());
+        cpjson::set_string("BibTeX", in->get_BibTeX().c_str(), val, doc);
         
         // Calculations with DT as inputs (what we are doing here)
         rapidjson::Value calc_DT; calc_DT.SetObject();
