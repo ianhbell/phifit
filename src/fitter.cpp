@@ -6,7 +6,6 @@
 // Includes from NISTfit
 #include "NISTfit/abc.h"
 #include "NISTfit/optimizers.h"
-#include "NISTfit/numeric_evaluators.h"
 
 // Includes from CoolProp
 #include "crossplatform_shared_ptr.h"
@@ -43,9 +42,29 @@ public:
 
 /// This class holds common terms for outputs
 class PhiFitOutput : public NumericOutput {
+protected:
+    std::string m_error_message;
 public:
     PhiFitOutput(const std::shared_ptr<NumericInput> &in) : NumericOutput(in) {};
     virtual void to_JSON(rapidjson::Value &, rapidjson::Document &) = 0;
+    /// On any exception, set the error value
+    void exception_handler(){
+        try{
+            // Re-throw the uncaught exception that was thrown in the evaluate_one function
+            throw;
+        }
+        catch(std::exception &e){
+            m_error_message = e.what();
+            m_y_calc = 10000;
+        }
+        catch(...){
+            // Set the error value
+            m_error_message = "Undefined error";
+            m_y_calc = 10000;
+        }
+    };
+    /// Return the stored error message
+    std::string error_message(){ return m_error_message; };
 };
 
 /// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
@@ -110,46 +129,42 @@ public:
 
     // Do the calculation
     void evaluate_one() {
-        m_y_calc = 1e80;
+        m_error_message.clear();
         const bool update_densities = false;
         const double weight = 1;
-        try{
-            const std::vector<double> &c = m_evaluator->get_const_coefficients();
-            // Resize the row in the Jacobian matrix if needed
-            std::size_t N = c.size();
-            if (Jacobian_row.size() != N) {
-                resize(N);
-            }
-            if (JtempL.size() != N){ JtempL.resize(N); }
-            if (JtempV.size() != N) { JtempV.resize(N); }
 
-            // Evaluate the residual at given coefficients
-            m_y_calc = weight*evaluate(c);
-
-            std::size_t i = 0;
-            evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), PTXY_in->x(), i, JtempL);
-            evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), PTXY_in->x(), i, JtempL);
-            evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), PTXY_in->y(), i, JtempV);
-            evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), PTXY_in->y(), i, JtempV);
-            
-            for (std::size_t i = 0; i < c.size(); ++i) {
-                // Numerical derivatives for checking purposes
-                // ------------
-                //Jacobian_row[i] = der_num(i, 0.00001);
-
-                Jacobian_row[i] = weight*(JtempV[i] - JtempL[i]);
-            }
-            
-            // Update the densities if requested and the error is less than the previous value
-            // that resulted in the densities being cached
-            if (update_densities && std::abs(m_y_calc) < std::abs(previous_error)) {
-                PTXY_in->set_rhoV(HEOS->SatV->rhomolar());
-                PTXY_in->set_rhoL(HEOS->SatL->rhomolar());
-                previous_error = m_y_calc;
-            }
+        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        // Resize the row in the Jacobian matrix if needed
+        std::size_t N = c.size();
+        if (Jacobian_row.size() != N) {
+            resize(N);
         }
-        catch(...){
-            m_y_calc = 10000;
+        if (JtempL.size() != N){ JtempL.resize(N); }
+        if (JtempV.size() != N) { JtempV.resize(N); }
+
+        // Evaluate the residual at given coefficients
+        m_y_calc = weight*evaluate(c);
+
+        std::size_t i = 0;
+        evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), PTXY_in->x(), i, JtempL);
+        evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), PTXY_in->x(), i, JtempL);
+        evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), PTXY_in->y(), i, JtempV);
+        evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), PTXY_in->y(), i, JtempV);
+        
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            // Numerical derivatives for checking purposes
+            // ------------
+            //Jacobian_row[i] = der_num(i, 0.00001);
+
+            Jacobian_row[i] = weight*(JtempV[i] - JtempL[i]);
+        }
+        
+        // Update the densities if requested and the error is less than the previous value
+        // that resulted in the densities being cached
+        if (update_densities && std::abs(m_y_calc) < std::abs(previous_error)) {
+            PTXY_in->set_rhoV(HEOS->SatV->rhomolar());
+            PTXY_in->set_rhoL(HEOS->SatL->rhomolar());
+            previous_error = m_y_calc;
         }
 
     }
@@ -321,6 +336,8 @@ public:
         cpjson::set_double_array("x", PTXY_in->x(), val, doc);
         cpjson::set_double_array("y", PTXY_in->y(), val, doc);
         cpjson::set_string("BibTeX", PTXY_in->get_BibTeX().c_str(), val, doc);
+        
+        cpjson::set_string("error", m_error_message, val, doc);
 
         // Add it to the list
         list.PushBack(val, doc.GetAllocator());
@@ -378,23 +395,17 @@ public:
 
     // Do the calculation
     void evaluate_one() {
-        try{
-            const std::vector<double> &c = m_evaluator->get_const_coefficients();
-            // Resize the row in the Jacobian matrix if needed
-            if (Jacobian_row.size() != c.size()) {
-                resize(c.size());
-            }
-        
-            // Evaluate the residual at given coefficients
-            m_y_calc = evaluate(c, false);
-            // Evaluate the analytic derivatives of the residuals with respect to the coefficients
-            analyt_derivs(Jacobian_row);
+        m_error_message.clear();
+        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        // Resize the row in the Jacobian matrix if needed
+        if (Jacobian_row.size() != c.size()) {
+            resize(c.size());
         }
-        catch (...) {
-            m_y_calc = 10000;
-//            m_y_calc = evaluate(m_evaluator->get_const_coefficients(), false);
-//            throw;
-        }
+    
+        // Evaluate the residual at given coefficients
+        m_y_calc = evaluate(c, false);
+        // Evaluate the analytic derivatives of the residuals with respect to the coefficients
+        analyt_derivs(Jacobian_row);
 
         //// Numerical derivatives for testing purposes if necessary
         //for (std::size_t i = 0; i < c.size(); ++i) {
@@ -498,7 +509,7 @@ public:
         val.AddMember("type", "PRhoT", doc.GetAllocator()); 
         val.AddMember("T (K)", PRhoT_in->T(), doc.GetAllocator());
         val.AddMember("p (Pa)", PRhoT_in->p(), doc.GetAllocator());
-        val.AddMember("rhomolar (mol/m3)", PRhoT_in->rhomolar(), doc.GetAllocator());
+        val.AddMember("rho (mol/m3)", PRhoT_in->rhomolar(), doc.GetAllocator());
         cpjson::set_double_array("z", PRhoT_in->z(), val, doc);
         cpjson::set_string("BibTeX", PRhoT_in->get_BibTeX().c_str(), val, doc);
         
@@ -506,7 +517,88 @@ public:
         val.AddMember("residue", m_y_calc, doc.GetAllocator());
         val.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
         val.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
+        cpjson::set_string("error", m_error_message, val, doc);
 
+        // Add it to the list
+        list.PushBack(val, doc.GetAllocator());
+    }
+};
+
+/// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
+/// Does not have any of its own routines
+class CriticalPointInput : public PhiFitInput
+{
+protected:
+    double m_pc, //< Pressure (Pa)
+    m_rhomolar, //< Molar density (mol/m^3)
+    m_Tc; //< Temperature (K)
+    std::vector<double> m_z; //< Molar composition of mixture
+public:
+    /*
+     @param AS AbstractState to be used for fitting
+     @param pc Crtical pressure in Pa
+     @param Tc Critical temperature in K
+     @param z Molar composition vector
+     */
+    CriticalPointInput(shared_ptr<CoolProp::AbstractState> &AS, double pc, double Tc, const std::vector<double>&z)
+    : PhiFitInput(Tc, pc), m_pc(pc), m_Tc(Tc), m_z(z) {this->AS = AS;};
+    /// Get the temperature (K)
+    double Tc() { return m_Tc; }
+    /// Get the pressure (Pa)
+    double pc() { return m_pc; }
+    /// Get the mole fractions
+    const std::vector<double> &z() { return m_z; }
+};
+
+class CriticalPointOutput : public PhiFitOutput {
+protected:
+    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
+public:
+    CriticalPointOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
+    : PhiFitOutput(in), m_evaluator(eval) { };
+    
+    /// Return the error
+    double get_error() { return m_y_calc; };
+    
+    // Do the calculation
+    void evaluate_one() {
+        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        // Resize the row in the Jacobian matrix if needed
+        if (Jacobian_row.size() != c.size()) {
+            resize(c.size());
+        }
+        
+        // Cast abstract input to the derived type so we can access its attributes
+        CriticalPointInput *in = static_cast<CriticalPointInput*>(m_in.get());
+        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
+        
+        // Set the BIP in main instance
+        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
+        
+        HEOS->update(CoolProp::PT_INPUTS, in->pc(), in->Tc());
+        double L1star = 0, M1star = 0;
+        HEOS->criticality_contour_values(L1star, M1star);
+        m_y_calc = L1star*1e10;
+        
+        //// Numerical derivatives for testing purposes if necessary
+        //for (std::size_t i = 0; i < c.size(); ++i) {
+        //    // Numerical derivatives :(
+        //    Jacobian_row[i] = der(i, 0.00001);
+        //}
+    }
+    /// Dump this data structure to JSON
+    void to_JSON(rapidjson::Value &list, rapidjson::Document &doc) {
+        CriticalPointInput *in = static_cast<CriticalPointInput*>(m_in.get());
+        
+        // Populate the JSON structure
+        rapidjson::Value val; val.SetObject();
+        val.AddMember("type", "PRhoT", doc.GetAllocator());
+        val.AddMember("Tc (K)", in->Tc(), doc.GetAllocator());
+        val.AddMember("pc (Pa)", in->pc(), doc.GetAllocator());
+        cpjson::set_double_array("z", in->z(), val, doc);
+        val.AddMember("residue", m_y_calc, doc.GetAllocator());
+        
         // Add it to the list
         list.PushBack(val, doc.GetAllocator());
     }
