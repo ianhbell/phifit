@@ -578,10 +578,11 @@ public:
         NumericOutput *_out = static_cast<NumericOutput *>(m_outputs[0].get());
         PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
         CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-        PhiFitDepartureFunction* pdep = static_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[0][1].get());
-        rapidjson::Value dep = pdep->to_JSON(doc);
-        doc.AddMember("departure[i][j]", dep, doc.GetAllocator());
-
+        PhiFitDepartureFunction* pdep = dynamic_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[0][1].get());
+        if (pdep != nullptr){
+            rapidjson::Value dep = pdep->to_JSON(doc);
+            doc.AddMember("departure[i][j]", dep, doc.GetAllocator());
+        }
         return cpjson::json2string(doc);
     }
     void update_departure_function(rapidjson::Value& fit0data) {
