@@ -92,9 +92,18 @@ protected:
     std::vector<double> JtempL, ///< A temporary buffer for holding the liquid evaluation of derivatives w.r.t. coefficients
                         JtempV; ///< A temporary buffer for holding the vapor evaluation of derivatives w.r.t. coefficients
     double previous_error;
+private:
+    PTXYInput *PTXY_in;
+    CoolProp::HelmholtzEOSMixtureBackend *HEOS;
+    CoolProp::GERG2008ReducingFunction *GERG;
 public:
     PTXYOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : PhiFitOutput(in), m_evaluator(eval), previous_error(1e90) { };
+        : PhiFitOutput(in), m_evaluator(eval), previous_error(1e90) {
+            // Cast base class pointers to the derived type(s) so we can access their attributes
+            PTXY_in = static_cast<PTXYInput*>(m_in.get());
+            HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(PTXY_in->get_AS().get());
+            GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        };
 
     /// Return the error
     double get_error() { return m_y_calc; };
@@ -117,15 +126,11 @@ public:
             // Evaluate the residual at given coefficients
             m_y_calc = weight*evaluate(c);
 
-            // Cast abstract input to the derived type so we can access its attributes
-            PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
-            CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-
             std::size_t i = 0;
-            evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
-            evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), in->x(), i, JtempL);
-            evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
-            evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), in->y(), i, JtempV);
+            evaluate_mu0_over_RT_derivatives(HEOS->SatL.get(), PTXY_in->x(), i, JtempL);
+            evaluate_mur_over_RT_derivatives(HEOS->SatL.get(), PTXY_in->x(), i, JtempL);
+            evaluate_mu0_over_RT_derivatives(HEOS->SatV.get(), PTXY_in->y(), i, JtempV);
+            evaluate_mur_over_RT_derivatives(HEOS->SatV.get(), PTXY_in->y(), i, JtempV);
             
             for (std::size_t i = 0; i < c.size(); ++i) {
                 // Numerical derivatives for checking purposes
@@ -138,8 +143,8 @@ public:
             // Update the densities if requested and the error is less than the previous value
             // that resulted in the densities being cached
             if (update_densities && std::abs(m_y_calc) < std::abs(previous_error)) {
-                in->set_rhoV(HEOS->SatV->rhomolar());
-                in->set_rhoL(HEOS->SatL->rhomolar());
+                PTXY_in->set_rhoV(HEOS->SatV->rhomolar());
+                PTXY_in->set_rhoL(HEOS->SatL->rhomolar());
                 previous_error = m_y_calc;
             }
         }
@@ -150,20 +155,15 @@ public:
     }
     double evaluate(const std::vector<double> &c) {
         
-        // Cast abstract input to the derived type so we can access its attributes
-        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
-        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-        
         // Calculate the chemical potentials for liquid and vapor phases
         std::size_t i = 0;
-        double muL = mu_over_RT(HEOS->SatL.get(), c, in->x(), i, in->rhoL());
-        double muV = mu_over_RT(HEOS->SatV.get(), c, in->y(), i, in->rhoV());
+        double muL = mu_over_RT(HEOS->SatL.get(), c, PTXY_in->x(), i, PTXY_in->rhoL());
+        double muV = mu_over_RT(HEOS->SatV.get(), c, PTXY_in->y(), i, PTXY_in->rhoV());
         
         return muV - muL;
     }
     double mu_over_RT(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &c, const std::vector<double> &z, std::size_t i, double rhomolar_guess = -1) {
         
-        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
         GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
         
         // Cast abstract input to the derived type so we can access its attributes
@@ -182,8 +182,6 @@ public:
         return HEOS->chemical_potential(i)/(HEOS->gas_constant()*HEOS->T());
     }
     void evaluate_mu0_over_RT_derivatives(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i, std::vector<double> & buffer) {
-        // Cast abstract input to the derived type so we can access its attributes
-        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
 
         // Zero out the buffer
         buffer[0] = 0; buffer[1] = 0; buffer[2] = 0; buffer[3] = 0;
@@ -229,10 +227,9 @@ public:
     }
     void evaluate_mur_over_RT_derivatives(CoolProp::HelmholtzEOSMixtureBackend *HEOS, const std::vector<double> &z, std::size_t i, std::vector<double> & buffer){
 
+        // ----
         // Buffer already partially filled from ideal-gas contribution
-
-        // Cast abstract input to the derived type so we can access its attributes
-        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        // ----
 
         double rhor = HEOS->rhomolar_reducing();
         double Tr = HEOS->T_reducing();
@@ -313,19 +310,17 @@ public:
     }
     /// Dump this data structure to JSON
     void to_JSON(rapidjson::Value &list, rapidjson::Document &doc) {
-        
-        PTXYInput *in = static_cast<PTXYInput*>(m_in.get());
 
         // Populate the JSON structure
         rapidjson::Value val;
         val.SetObject(); 
         val.AddMember("type", "PTXY", doc.GetAllocator());
-        val.AddMember("T (K)", in->T(), doc.GetAllocator());
-        val.AddMember("p (Pa)", in->p(), doc.GetAllocator());
+        val.AddMember("T (K)", PTXY_in->T(), doc.GetAllocator());
+        val.AddMember("p (Pa)", PTXY_in->p(), doc.GetAllocator());
         val.AddMember("residue", m_y_calc, doc.GetAllocator());
-        cpjson::set_double_array("x", in->x(), val, doc);
-        cpjson::set_double_array("y", in->y(), val, doc);
-        cpjson::set_string("BibTeX", in->get_BibTeX().c_str(), val, doc);
+        cpjson::set_double_array("x", PTXY_in->x(), val, doc);
+        cpjson::set_double_array("y", PTXY_in->y(), val, doc);
+        cpjson::set_string("BibTeX", PTXY_in->get_BibTeX().c_str(), val, doc);
 
         // Add it to the list
         list.PushBack(val, doc.GetAllocator());
@@ -365,9 +360,18 @@ public:
 class PRhoTOutput : public PhiFitOutput {
 protected:
     AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
+private:
+    PRhoTInput *PRhoT_in;
+    CoolProp::HelmholtzEOSMixtureBackend *HEOS;
+    CoolProp::GERG2008ReducingFunction *GERG;
 public:
     PRhoTOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : PhiFitOutput(in), m_evaluator(eval) { };
+        : PhiFitOutput(in), m_evaluator(eval) {
+            // Cast base class pointers to the derived type(s) so we can access their attributes
+            PRhoT_in = static_cast<PRhoTInput*>(m_in.get());
+            HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(PRhoT_in->get_AS().get());
+            GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        };
 
     /// Return the error
     double get_error() { return m_y_calc; };
@@ -400,18 +404,13 @@ public:
     }
     double evaluate(const std::vector<double> &c, bool update_densities = false) {
 
-        // Cast abstract input to the derived type so we can access its attributes
-        PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
-        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-
-        // Set the BIP in main instance
-        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
+        // Set the interaction parameters in the mixture model
         GERG->set_binary_interaction_double(0,1,c[0],c[1],c[2],c[3]);
 
         // Set the mole fractions
-        HEOS->set_mole_fractions(in->z());
+        HEOS->set_mole_fractions(PRhoT_in->z());
         // Calculate p = f(T,rho)
-        HEOS->update_DmolarT_direct(in->rhomolar(), in->T());
+        HEOS->update_DmolarT_direct(PRhoT_in->rhomolar(), PRhoT_in->T());
         // The derivative dpdrho__T (needs to be positive always for homogenous states!)
         double dpdrho__T = HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT);
         // This penalty function is added to avoid negative derivatives
@@ -419,31 +418,26 @@ public:
         // Pressures should be positive, penalize negative pressures
         penalty += (HEOS->p() > 0) ? 0 : -HEOS->p();
         // Return residual as (p_calc - p_exp)/rho_exp*drhodP_exp|T 
-        return (HEOS->p() - in->p())/in->rhomolar()/dpdrho__T;// + penalty;
+        return (HEOS->p() - PRhoT_in->p())/PRhoT_in->rhomolar()/dpdrho__T;// + penalty;
     }
     void analyt_derivs(std::vector<double> &J) {
-        
-        // Cast abstract input to the derived type so we can access its attributes
-        PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
-        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-        CoolProp::GERG2008ReducingFunction *GERG = static_cast<CoolProp::GERG2008ReducingFunction*>(HEOS->Reducing.get());
 
         // ---
         // Evaluate already called, constants set
         // ---
 
-        double DELTAp = HEOS->p() - in->p();
-        double rho_exp = in->rhomolar();
+        double DELTAp = HEOS->p() - PRhoT_in->p();
+        double rho_exp = PRhoT_in->rhomolar();
         double drho_dp__constT_c = HEOS->first_partial_deriv(CoolProp::iDmolar, CoolProp::iP, CoolProp::iT);
 
         // Some intermediate terms that show up in a couple of places
         double delta = HEOS->delta();
         double RT = HEOS->gas_constant()*HEOS->T();
-        double dtau_dbetaT = 1/HEOS->T()*GERG->dTr_dbetaT(in->z());
-        double dtau_dgammaT = 1/HEOS->T()*GERG->dTr_dgammaT(in->z());
-        double rhor = GERG->rhormolar(in->z());
-        double ddelta_dbetaV = -delta*GERG->drhormolar_dbetaV(in->z())/rhor;
-        double ddelta_dgammaV = -delta*GERG->drhormolar_dgammaV(in->z())/rhor;
+        double dtau_dbetaT = 1/HEOS->T()*GERG->dTr_dbetaT(PRhoT_in->z());
+        double dtau_dgammaT = 1/HEOS->T()*GERG->dTr_dgammaT(PRhoT_in->z());
+        double rhor = GERG->rhormolar(PRhoT_in->z());
+        double ddelta_dbetaV = -delta*GERG->drhormolar_dbetaV(PRhoT_in->z())/rhor;
+        double ddelta_dgammaV = -delta*GERG->drhormolar_dgammaV(PRhoT_in->z())/rhor;
 
         // First derivatives of pressure with respect to each of the coefficients at constant T,rho
         double dp_dbetaT = HEOS->rhomolar()*RT*delta*HEOS->d2alphar_dDelta_dTau()*dtau_dbetaT;
@@ -497,41 +491,27 @@ public:
     /// Dump this data structure to JSON
     void to_JSON(rapidjson::Value &list, rapidjson::Document &doc) {
 
-        PRhoTInput *in = static_cast<PRhoTInput*>(m_in.get());
-        CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
-
         // Populate the JSON structure
         rapidjson::Value val; val.SetObject();
-        val.AddMember("type", "PRhoT", doc.GetAllocator()); 
-        val.AddMember("T (K)", in->T(), doc.GetAllocator());
-        val.AddMember("p (Pa)", in->p(), doc.GetAllocator());
-        val.AddMember("rhomolar (mol/m3)", in->rhomolar(), doc.GetAllocator());
-        cpjson::set_double_array("z", in->z(), val, doc);
-        val.AddMember("residue", m_y_calc, doc.GetAllocator());
-        cpjson::set_string("BibTeX", in->get_BibTeX().c_str(), val, doc);
         
-        // Calculations with DT as inputs (what we are doing here)
-        rapidjson::Value calc_DT; calc_DT.SetObject();
-        calc_DT.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
-        calc_DT.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
-        val.AddMember("calc_DT", calc_DT, doc.GetAllocator());
-
-        // Calculations with PT as inputs (the opposite calculation)
-        rapidjson::Value calc_PT; calc_PT.SetObject();
-        try{
-            HEOS->update_TP_guessrho(in->T(), in->p(), in->rhomolar());
-            calc_PT.AddMember("rhomolar (mol/m3)", HEOS->rhomolar(), doc.GetAllocator()); 
-        }
-        catch (std::exception &e) {
-            //std::cout << e.what() << std::endl;
-            calc_PT.AddMember("rhomolar (mol/m3)", -1, doc.GetAllocator());
-        }
-        val.AddMember("calc_PT", calc_PT, doc.GetAllocator());
+        // Inputs
+        val.AddMember("type", "PRhoT", doc.GetAllocator()); 
+        val.AddMember("T (K)", PRhoT_in->T(), doc.GetAllocator());
+        val.AddMember("p (Pa)", PRhoT_in->p(), doc.GetAllocator());
+        val.AddMember("rhomolar (mol/m3)", PRhoT_in->rhomolar(), doc.GetAllocator());
+        cpjson::set_double_array("z", PRhoT_in->z(), val, doc);
+        cpjson::set_string("BibTeX", PRhoT_in->get_BibTeX().c_str(), val, doc);
+        
+        // Outputs
+        val.AddMember("residue", m_y_calc, doc.GetAllocator());
+        val.AddMember("p[calc] (Pa)", HEOS->p(), doc.GetAllocator());
+        val.AddMember("dp/drho|T (Pa/(mol/m3))", HEOS->first_partial_deriv(CoolProp::iP, CoolProp::iDmolar, CoolProp::iT), doc.GetAllocator());
 
         // Add it to the list
         list.PushBack(val, doc.GetAllocator());
     }
 };
+
 
 /// The evaluator class that is used to evaluate the output values from the input values
 class MixtureEvaluator : public AbstractNumericEvaluator {
