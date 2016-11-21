@@ -10,6 +10,8 @@ import sys
 sys.path.append('build/pybind11/Release')
 import MixtureCoefficientFitter as MCF
 from coeffs import ArrayDeconstructor
+print('CoolProp version:', MCF.get_global_param_string("version"))
+print('CoolProp gitrevision:', MCF.get_global_param_string("gitrevision"))
 
 # Other imports (conda installable packages)
 import numpy as np, matplotlib.pyplot as plt, pandas, scipy.optimize
@@ -81,23 +83,47 @@ assert(len(bounds) == len(generator_functions))
 assert(len(bounds) == len(normalizing_functions))
 assert(len(bounds) == len(sigma))
 
-with open('EWL_NH3_H2O.json','r') as fp:
+with open('Lemmon_Jacobsen_HFC.json','r') as fp:
     departure0 = json.load(fp)
 
 # Instantiate the fitter class with the experimental data stored in JSON format
 cfc = MCF.CoeffFitClass(json.dumps(get_data()))
 cfc.setup(json.dumps(departure0.copy()))
 
-cfc.evaluate_serial([0.911640, 0.9111660, 1.0541730, 1.3223907])
+cfc.set_binary_interaction_double(0,1,"Fij",0.87211862)
+cfc.evaluate_serial([0.9945984740946407, 1.0477559061358808, 1.0000011520387146, 1.0400020139323476])
 jj = json.loads(cfc.dump_outputs_to_JSON())
 with open('baseline.json', 'w') as fp:
     fp.write(json.dumps(jj, indent = 2))
-print('baseline:', cfc.sum_of_squares()**0.5)
-cfc.run(True, 4, [0.911640, 0.9111660, 1.0541730, 1.3223907])
+print('baseline:', cfc.sum_of_squares())
+
+cfc.set_binary_interaction_double(0,1,"Fij",0.87211862)
+cfc.run(True, 4, [0.9945984740946407, 1.0477559061358808, 1.0000011520387146, 1.0400020139323476])
 jj = json.loads(cfc.dump_outputs_to_JSON())
 with open('w_fitting_betasgammas.json', 'w') as fp:
     fp.write(json.dumps(jj, indent = 2))
-print('w/ fitting betas, gammas:', cfc.sum_of_squares()**0.5)
+print('w/ fitting betas, gammas:', cfc.sum_of_squares(), cfc.cfinal())
+
+# cfc.set_binary_interaction_double(0,1,"Fij",2)
+# cfc.evaluate_serial([0.9945984740946407, 1.0477559061358808, 1.0000011520387146, 1.0400020139323476])
+# jj = json.loads(cfc.dump_outputs_to_JSON())
+# with open('fitted.json', 'w') as fp:
+#     fp.write(json.dumps(jj, indent = 2))
+# print('fitted:', cfc.sum_of_squares())
+# sys.exit()
+
+
+for Fij in np.linspace(0.1, 2):
+    cfc.set_binary_interaction_double(0,1,"Fij",Fij)
+    cfc.run(True, 4, [0.9945984740946407, 1.0477559061358808, 1.0000011520387146, 1.0400020139323476])
+    print(Fij, 'w/ fitting betas, gammas:', cfc.sum_of_squares(), cfc.cfinal())
+
+cfc.set_binary_interaction_double(0,1,"Fij",0.87211862)
+cfc.run(True, 4, [0.9945984740946407, 1.0477559061358808, 1.0000011520387146, 1.0400020139323476])
+jj = json.loads(cfc.dump_outputs_to_JSON())
+with open('w_fitting_betasgammas.json', 'w') as fp:
+    fp.write(json.dumps(jj, indent = 2))
+print('w/ fitting betas, gammas:', cfc.sum_of_squares())
 
 cfc.set_departure_function_by_name("GeneralizedAirWater")
 cfc.set_binary_interaction_double(0,1,"Fij",0.487755102041)
@@ -114,7 +140,7 @@ with open('GeneralizedAirWaterFit.json', 'w') as fp:
 #         cfc.set_binary_interaction_double(0,1,"Fij",Fij)
 #         cfc.run(True, 4, [0.911640, 0.9111660, 1.0541730, 1.3223907])
 #         cfc.dump_outputs_to_JSON()
-#         print(Fij, 'w/ ['+fcn+'] and fitting betas, gammas:', cfc.sum_of_squares()**0.5, cfc.cfinal())
+#         print(Fij, 'w/ ['+fcn+'] and fitting betas, gammas:', cfc.sum_of_squares(), cfc.cfinal())
 # sys.exit()
 
 # cfc.setup(json.dumps(departure0.copy()))
@@ -140,7 +166,7 @@ def objective(x, cfc, Nterms, fit_delta = True, x0 = None, write_JSON = False):
     try:
         # cfc.evaluate_serial(betagamma)
         cfc.evaluate_parallel(betagamma, 4)
-        err = cfc.sum_of_squares()**0.5
+        err = cfc.sum_of_squares()
         if np.isnan(err):
             err = 1e8
         if err < 0.1 or write_JSON:

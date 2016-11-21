@@ -131,7 +131,7 @@ public:
     void evaluate_one() {
         m_error_message.clear();
         const bool update_densities = false;
-        const double weight = 1;
+        const double weight = 0.01;
 
         const std::vector<double> &c = m_evaluator->get_const_coefficients();
         // Resize the row in the Jacobian matrix if needed
@@ -804,7 +804,7 @@ void CoeffFitClass::evaluate_parallel(const std::vector<double> &c0, short Nthre
     m_eval->set_coefficients(c0);
     m_eval->evaluate_parallel(Nthreads);
 }
-double CoeffFitClass::sum_of_squares() { return m_eval->get_error_vector().norm(); }
+double CoeffFitClass::sum_of_squares() { return m_eval->get_error_vector().squaredNorm(); }
 std::vector<double> CoeffFitClass::errorvec(){
     const Eigen::VectorXd &vec = m_eval->get_error_vector(); 
     return std::vector<double>(vec.data(), vec.data() + vec.size());
