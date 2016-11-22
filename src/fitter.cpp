@@ -107,7 +107,6 @@ public:
 
 class PTXYOutput : public PhiFitOutput {
 protected:
-    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
     std::vector<double> JtempL, ///< A temporary buffer for holding the liquid evaluation of derivatives w.r.t. coefficients
                         JtempV; ///< A temporary buffer for holding the vapor evaluation of derivatives w.r.t. coefficients
     double previous_error;
@@ -116,8 +115,8 @@ private:
     CoolProp::HelmholtzEOSMixtureBackend *HEOS;
     CoolProp::GERG2008ReducingFunction *GERG;
 public:
-    PTXYOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : PhiFitOutput(in), m_evaluator(eval), previous_error(1e90) {
+    PTXYOutput(const std::shared_ptr<NumericInput> &in)
+        : PhiFitOutput(in), previous_error(1e90) {
             // Cast base class pointers to the derived type(s) so we can access their attributes
             PTXY_in = static_cast<PTXYInput*>(m_in.get());
             HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(PTXY_in->get_AS().get());
@@ -133,7 +132,7 @@ public:
         const bool update_densities = false;
         const double weight = 0.01;
 
-        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        const std::vector<double> &c = get_AbstractEvaluator()->get_const_coefficients();
         // Resize the row in the Jacobian matrix if needed
         std::size_t N = c.size();
         if (Jacobian_row.size() != N) {
@@ -291,12 +290,12 @@ public:
 
     /// Numerical derivative of the residual term
     double der_num(std::size_t i, double dc) {
-        const std::vector<double> &c0 = m_evaluator->get_const_coefficients();
+        const std::vector<double> &c0 = get_AbstractEvaluator()->get_const_coefficients();
         std::vector<double> cp = c0, cm = c0;
         cp[i] += dc; cm[i] -= dc;
         return (evaluate(cp) - evaluate(cm))/(2*dc);
     }
-    static std::shared_ptr<NumericOutput> factory(rapidjson::Value &v, const std::string &backend, const std::string &fluids, AbstractNumericEvaluator *eval){
+    static std::shared_ptr<NumericOutput> factory(rapidjson::Value &v, const std::string &backend, const std::string &fluids){
         std::shared_ptr<NumericOutput> out;
 
         // Extract parameters from JSON data
@@ -319,7 +318,7 @@ public:
             // Generate the input which stores the PTxy data that is to be fit
             std::shared_ptr<NumericInput> in(new PTXYInput(AS, T, p, x, y, rhoL, rhoV, BibTeX));
             // Generate and add the output value
-            out.reset(new PTXYOutput(std::move(in), eval));
+            out.reset(new PTXYOutput(std::move(in)));
         }
         return out;
     }
@@ -375,15 +374,13 @@ public:
 };
 
 class PRhoTOutput : public PhiFitOutput {
-protected:
-    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
 private:
     PRhoTInput *PRhoT_in;
     CoolProp::HelmholtzEOSMixtureBackend *HEOS;
     CoolProp::GERG2008ReducingFunction *GERG;
 public:
-    PRhoTOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-        : PhiFitOutput(in), m_evaluator(eval) {
+    PRhoTOutput(const std::shared_ptr<NumericInput> &in)
+        : PhiFitOutput(in) {
             // Cast base class pointers to the derived type(s) so we can access their attributes
             PRhoT_in = static_cast<PRhoTInput*>(m_in.get());
             HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(PRhoT_in->get_AS().get());
@@ -396,7 +393,7 @@ public:
     // Do the calculation
     void evaluate_one() {
         m_error_message.clear();
-        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        const std::vector<double> &c = get_AbstractEvaluator()->get_const_coefficients();
         // Resize the row in the Jacobian matrix if needed
         if (Jacobian_row.size() != c.size()) {
             resize(c.size());
@@ -476,12 +473,12 @@ public:
 
     /// Numerical derivative of the residual term
     double der(std::size_t i, double dc) {
-        const std::vector<double> &c0 = m_evaluator->get_const_coefficients();
+        const std::vector<double> &c0 = get_AbstractEvaluator()->get_const_coefficients();
         std::vector<double> cp = c0, cm = c0;
         cp[i] += dc; cm[i] -= dc;
         return (evaluate(cp) - evaluate(cm)) / (2 * dc);
     }
-    static std::shared_ptr<NumericOutput> factory(rapidjson::Value &v, const std::string &backend, const std::string &fluids, AbstractNumericEvaluator *eval) {
+    static std::shared_ptr<NumericOutput> factory(rapidjson::Value &v, const std::string &backend, const std::string &fluids) {
         std::shared_ptr<NumericOutput> out;
 
         // Extract parameters from JSON data
@@ -496,7 +493,7 @@ public:
         // Generate the input which stores the PTxy data that is to be fit
         std::shared_ptr<NumericInput> in(new PRhoTInput(AS, p, rhomolar, T, z, BibTeX));
         // Generate and add the output value
-        out.reset(new PRhoTOutput(std::move(in), eval));
+        out.reset(new PRhoTOutput(std::move(in)));
         return out;
     }
     /// Dump this data structure to JSON
@@ -524,7 +521,7 @@ public:
     }
 };
 
-/// The data structure used to hold an input to Levenberg-Marquadt fitter for parallel evaluation
+/// The data structure used to hold an input to Levenberg-Marquardt fitter for parallel evaluation
 /// Does not have any of its own routines
 class CriticalPointInput : public PhiFitInput
 {
@@ -551,18 +548,16 @@ public:
 };
 
 class CriticalPointOutput : public PhiFitOutput {
-protected:
-    AbstractNumericEvaluator *m_evaluator; // The evaluator connected with this output (DO NOT FREE!)
 public:
-    CriticalPointOutput(const std::shared_ptr<NumericInput> &in, AbstractNumericEvaluator *eval)
-    : PhiFitOutput(in), m_evaluator(eval) { };
+    CriticalPointOutput(const std::shared_ptr<NumericInput> &in)
+    : PhiFitOutput(in) { };
     
     /// Return the error
     double get_error() { return m_y_calc; };
     
     // Do the calculation
     void evaluate_one() {
-        const std::vector<double> &c = m_evaluator->get_const_coefficients();
+        const std::vector<double> &c = get_AbstractEvaluator()->get_const_coefficients();
         // Resize the row in the Jacobian matrix if needed
         if (Jacobian_row.size() != c.size()) {
             resize(c.size());
@@ -606,7 +601,7 @@ public:
 
 
 /// The evaluator class that is used to evaluate the output values from the input values
-class MixtureEvaluator : public AbstractNumericEvaluator {
+class MixtureEvaluator : public NumericEvaluator {
 public:
     void add_terms(const std::string &backend, const std::string &fluids, rapidjson::Value& terms)
     {
@@ -618,15 +613,15 @@ public:
             std::string type = cpjson::get_string(*itr, "type");
 
             if (type == "PTXY"){
-                auto out = PTXYOutput::factory(*itr, backend, fluids, static_cast<AbstractNumericEvaluator*>(this));
+                auto out = PTXYOutput::factory(*itr, backend, fluids);
                 if (out){
-                    m_outputs.push_back(std::move(out));
+                    add_output(std::move(out));
                 }
             }
             else if (type == "PRhoT") {
-                auto out = PRhoTOutput::factory(*itr, backend, fluids, static_cast<AbstractNumericEvaluator*>(this));
+                auto out = PRhoTOutput::factory(*itr, backend, fluids);
                 if (out) {
-                    m_outputs.push_back(std::move(out));
+                    add_output(std::move(out));
                 }
             }
             else {
@@ -641,13 +636,13 @@ public:
 
         // Get the list of outputs, store as "data"
         rapidjson::Value list(rapidjson::kArrayType);
-        for (auto &o : m_outputs) {
+        for (auto &o : get_outputs()) {
             static_cast<PhiFitOutput*>(o.get())->to_JSON(list, doc);
         }
         doc.AddMember("data", list, doc.GetAllocator());
 
         // Get the departure function
-        NumericOutput *_out = static_cast<NumericOutput *>(m_outputs[0].get());
+        NumericOutput *_out = static_cast<NumericOutput *>(get_outputs()[0].get());
         PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
         CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
         PhiFitDepartureFunction* pdep = dynamic_cast<PhiFitDepartureFunction*>(HEOS->residual_helmholtz->Excess.DepartureFunctionMatrix[0][1].get());
@@ -658,7 +653,7 @@ public:
         return cpjson::json2string(doc);
     }
     void update_departure_function(rapidjson::Value& fit0data) {
-        for (auto &out : m_outputs) {
+        for (auto &out : get_outputs()) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
@@ -672,7 +667,7 @@ public:
         }
     }
     void update_departure_function(const Coefficients& coeffs) {
-        for (auto &out : m_outputs) {
+        for (auto &out : get_outputs()) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
@@ -689,7 +684,7 @@ public:
         }
     }
     void set_departure_function_by_name(const std::string& name){
-        for (auto &out : m_outputs) {
+        for (auto &out : get_outputs()) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
@@ -702,7 +697,7 @@ public:
         }
     }
     void set_binary_interaction_double(const std::size_t i, const std::size_t j, const std::string &param, double val){
-        for (auto &out : m_outputs) {
+        for (auto &out : get_outputs()) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
@@ -711,7 +706,7 @@ public:
         }
     }
     std::string departure_function_to_JSON() {
-        for (auto &out : m_outputs) {
+        for (auto &out : get_outputs()) {
             NumericOutput *_out = static_cast<NumericOutput *>(out.get());
             PhiFitInput * in = static_cast<PhiFitInput *>(_out->get_input().get());
             CoolProp::HelmholtzEOSMixtureBackend *HEOS = static_cast<CoolProp::HelmholtzEOSMixtureBackend*>(in->get_AS().get());
