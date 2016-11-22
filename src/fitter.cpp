@@ -785,12 +785,12 @@ void CoeffFitClass::setup(const std::string &JSON_fit0_string)
 }
 void CoeffFitClass::run(bool threading, short Nthreads, const std::vector<double> &c0){
     auto startTime = std::chrono::system_clock::now();
-    LevenbergMarquadtOptions opts;
+    LevenbergMarquardtOptions opts;
     opts.c0 = c0; 
     opts.threading = threading; 
     opts.Nthreads = Nthreads; 
     opts.omega = 0.35;
-    m_cfinal = LevenbergMarquadt(m_eval, opts);
+    m_cfinal = LevenbergMarquardt(m_eval, opts);
     //for (int i = 0; i < cc.size(); i += 1) { std::cout << cc[i] << std::endl; }
     m_elap_sec = std::chrono::duration<double>(std::chrono::system_clock::now() - startTime).count();
 }
